@@ -1,1 +1,1 @@
-sudo rmmod KMonitor
+sudo rmmod KBlocker

