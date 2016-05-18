@@ -10,6 +10,7 @@
 #include <linux/proc_fs.h>
 #include <linux/times.h>
 #include <linux/timekeeping.h>
+#include <linux/unistd.h>
 #include <linux/string.h>
 #include <linux/rtc.h>
 // Write Protect Bit (CR0:16)
@@ -257,10 +258,11 @@ unsigned long **find_sys_call_table(void)
 
 static int __init init_kblocker (void)
 {
-  unsigned long cr0;	
-  printk(KERN_INFO "init KBlockerfs\n");
+  	unsigned long cr0;
+  	char *ptr = NULL;
+  	printk(KERN_INFO "init KBlockerfs\n");
   
-  syscall_table = (void **) find_sys_call_table();
+  	syscall_table = (void **) find_sys_call_table();
 
 	if (! proc_create("KBlocker",0666,NULL,&fops)) 
 	{
@@ -275,11 +277,20 @@ static int __init init_kblocker (void)
         return -1;
     }
     
-    printk(KERN_DEBUG "Found the sys_call_table at %16lx.\n", (unsigned long) syscall_table);
+    // printk(KERN_DEBUG "Found the sys_call_table at %16lx.\n", (unsigned long) syscall_table);
 
     cr0 = read_cr0();
     write_cr0(cr0 & ~CR0_WP);
 
+    ptr = memchr(syscall_table[__NR_execve], 0xE8, 200);
+    if(!ptr)
+    {
+    	printk(KERN_INFO "ERROR: Cannot find the execve call in init\n");
+    	return -1;
+    }
+    ++ptr;
+    original_execve_call = (void *)ptr + *(int32_t *)ptr + 4;	
+     *(int32_t*)ptr = (char*) my_sys_execve - ptr - 4;
     // original_execve_call = syscall_table[__NR_execve];
     // syscall_table[__NR_execve] = my_sys_execve;
 
@@ -289,14 +300,20 @@ static int __init init_kblocker (void)
 
 static void __exit exit_kblocker(void)
 {
+    char *ptr = 0;
     unsigned long cr0;
-    remove_proc_entry("KBlocker",NULL);
 
     cr0 = read_cr0();
     write_cr0(cr0 & ~CR0_WP);
     // syscall_table[__NR_execve] = original_execve_call;
-
-    printk(KERN_DEBUG "Everything is back to normal\n");
+	ptr = memchr(syscall_table[__NR_execve], 0xE8, 200);
+	if(!ptr++)
+	{
+		printk(KERN_INFO "ERROR: Cannot find the execve call in exit\n");
+	}
+	*(int32_t *)ptr = (char *) original_execve_call - ptr - 4;
+    remove_proc_entry("KBlocker",NULL);
+    // printk(KERN_DEBUG "Everything is back to normal\n");
     write_cr0(cr0);
     printk(KERN_INFO "exit KBlockerfs\n");
 }
