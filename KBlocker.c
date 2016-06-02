@@ -13,15 +13,27 @@
 #include <linux/unistd.h>
 #include <linux/string.h>
 #include <linux/rtc.h>
+#include <net/sock.h> 
+#include <linux/netlink.h>
+#include <linux/skbuff.h> 
+#include <linux/kthread.h>
+#include <linux/wait.h>
+#include <linux/slab.h>
+
+#define NETLINK_USER 31
 // Write Protect Bit (CR0:16)
 #define CR0_WP 0x00010000 
 
 #define MAX_EVENTS 10
 #define BUF_SIZE 128
 
+int ans = 0;
+
 static char msg[128];
 static int len = 0;
 static int len_check = 1;
+
+struct sock *nl_sk = NULL;
 
 /* monitoring flags */
 int exec_monitoring = 0;
@@ -29,6 +41,8 @@ int exec_blocking = 0;
 int script_monitoring = 0;
 int script_blocking = 0;
 
+int first_time = 1;
+int keep_working = 1;
 /*MAX_EVENTS stands for the maximum number of elements Queue can hold.
   num_of_events stands for the current size of the Queue.
   events is the array of elements. 
@@ -44,6 +58,42 @@ long(* original_execve_call)(const char *filename, const char *const argv[], con
 struct rtc_time tm;
 struct timeval time;
 unsigned long local_time;
+
+struct nlmsghdr *nlh;
+int pid;
+struct sk_buff *skb_out;
+
+void netlink_output(char * filename)
+{
+    printk(KERN_INFO "Entering: %s. first_time = %d. filename = %s\n", __FUNCTION__, first_time, filename);
+    if(first_time || !strcmp(filename, "./netlink_user")) // we want to get the pid of the user program, so in the first time we doesn't want to send anything.
+    {
+    	first_time = 0;
+    	return;
+    }
+    skb_out = nlmsg_new(strlen(filename), 0);
+    if (!skb_out) 
+    {
+        printk(KERN_ERR "Failed to allocate new skb\n");
+        return;
+    }
+
+    nlh = nlmsg_put(skb_out, 0, 0, NLMSG_DONE, strlen(filename), 0);
+    NETLINK_CB(skb_out).dst_group = 0; /* not in mcast group */
+    strncpy(nlmsg_data(nlh), filename, strlen(filename));
+
+    if (nlmsg_unicast(nl_sk, skb_out, pid) < 0)
+        printk(KERN_INFO "Error while sending back to user. pid = %d\n", pid);
+}
+
+static void netlink_input(struct sk_buff *skb)
+{
+    nlh = (struct nlmsghdr *)skb->data;
+    if(nlh->nlmsg_pid != 0)
+    	pid = nlh->nlmsg_pid; //pid of sending process
+    printk(KERN_INFO "KERNEL GOT:%s from pid:%d\n", (char *)nlmsg_data(nlh), pid);
+}
+
 
 void get_time(void)
 {
@@ -81,9 +131,21 @@ void enqueue(char *event)
     num_of_events++;
 }
 
+
+
 int my_sys_execve(const char *filename, const char *const argv[], const char *const envp[])
 {
-	printk(KERN_INFO "filename is %s\n", filename);
+	char message[128];
+	strcpy(message, filename);
+	// printk(KERN_INFO "filename is %s\n", filename);
+	if(keep_working)
+	{
+		netlink_output(message);
+	}
+	if(strcmp(filename, "./unload.sh") == 0)
+	{
+		keep_working = 0;
+	}
 	return original_execve_call(filename, argv, envp);
 }
 
@@ -260,8 +322,12 @@ static int __init init_kblocker (void)
 {
   	unsigned long cr0;
   	char *ptr = NULL;
-  	printk(KERN_INFO "init KBlockerfs\n");
   
+    struct netlink_kernel_cfg cfg = {
+        .input = netlink_input,
+    };
+  	printk(KERN_INFO "init KBlockerfs\n");
+
   	syscall_table = (void **) find_sys_call_table();
 
 	if (! proc_create("KBlocker",0666,NULL,&fops)) 
@@ -291,8 +357,13 @@ static int __init init_kblocker (void)
     ++ptr;
     original_execve_call = (void *)ptr + *(int32_t *)ptr + 4;	
      *(int32_t*)ptr = (char*) my_sys_execve - ptr - 4;
-    // original_execve_call = syscall_table[__NR_execve];
-    // syscall_table[__NR_execve] = my_sys_execve;
+
+    nl_sk = netlink_kernel_create(&init_net, NETLINK_USER, &cfg);
+    if (!nl_sk) 
+    {
+        printk(KERN_ALERT "Error creating socket.\n");
+        return -10;
+    }
 
     write_cr0(cr0);
     return 0;	
@@ -305,7 +376,8 @@ static void __exit exit_kblocker(void)
 
     cr0 = read_cr0();
     write_cr0(cr0 & ~CR0_WP);
-    // syscall_table[__NR_execve] = original_execve_call;
+    
+
 	ptr = memchr(syscall_table[__NR_execve], 0xE8, 200);
 	if(!ptr++)
 	{
@@ -313,7 +385,9 @@ static void __exit exit_kblocker(void)
 	}
 	*(int32_t *)ptr = (char *) original_execve_call - ptr - 4;
     remove_proc_entry("KBlocker",NULL);
-    // printk(KERN_DEBUG "Everything is back to normal\n");
+
+    netlink_kernel_release(nl_sk);
+
     write_cr0(cr0);
     printk(KERN_INFO "exit KBlockerfs\n");
 }
