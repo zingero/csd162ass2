@@ -43,6 +43,8 @@ int script_blocking = 0;
 
 int first_time = 1;
 int keep_working = 1;
+int blocked_program = 0;
+
 /*MAX_EVENTS stands for the maximum number of elements Queue can hold.
   num_of_events stands for the current size of the Queue.
   events is the array of elements. 
@@ -60,13 +62,13 @@ struct timeval time;
 unsigned long local_time;
 
 struct nlmsghdr *nlh;
-int pid;
+int portid;
 struct sk_buff *skb_out;
+char *sha;
 
 void netlink_output(char * filename)
 {
-    printk(KERN_INFO "Entering: %s. first_time = %d. filename = %s\n", __FUNCTION__, first_time, filename);
-    if(first_time || !strcmp(filename, "./netlink_user")) // we want to get the pid of the user program, so in the first time we doesn't want to send anything.
+    if(first_time || !strcmp(filename, "./netlink_user")) // we want to get the portid of the user program, so in the first time we doesn't want to send anything.
     {
     	first_time = 0;
     	return;
@@ -77,23 +79,40 @@ void netlink_output(char * filename)
         printk(KERN_ERR "Failed to allocate new skb\n");
         return;
     }
-
     nlh = nlmsg_put(skb_out, 0, 0, NLMSG_DONE, strlen(filename), 0);
     NETLINK_CB(skb_out).dst_group = 0; /* not in mcast group */
     strncpy(nlmsg_data(nlh), filename, strlen(filename));
+    printk(KERN_INFO "SENDING TO USER: filename = %s\n", filename);
+    if (nlmsg_unicast(nl_sk, skb_out, portid) < 0)
+        printk(KERN_INFO "Error while sending to user\n");
+}
 
-    if (nlmsg_unicast(nl_sk, skb_out, pid) < 0)
-        printk(KERN_INFO "Error while sending back to user. pid = %d\n", pid);
+void isBlockedProgram(void)
+{
+	// TODO: Orian: waiting for Oshrat to finish her data structure
+
+	//int i = 0;
+	// for(; i <  ; ++i)
+	// {
+	// 	if(strcmp(char, [i]) == 0)
+	// 		{
+	// 			blocked_program = 1;
+	// 			return;
+	// 		}
+	// }
+	blocked_program = 0;
 }
 
 static void netlink_input(struct sk_buff *skb)
 {
     nlh = (struct nlmsghdr *)skb->data;
-    if(nlh->nlmsg_pid != 0)
-    	pid = nlh->nlmsg_pid; //pid of sending process
-    printk(KERN_INFO "KERNEL GOT:%s from pid:%d\n", (char *)nlmsg_data(nlh), pid);
-}
+    sha = (char *)nlmsg_data(nlh);
+    isBlockedProgram();
 
+    if(nlh->nlmsg_pid != 0)
+    	portid = nlh->nlmsg_pid; //portid of sending process
+    printk(KERN_INFO "KERNEL GOT:%s\n", sha);
+}
 
 void get_time(void)
 {
@@ -131,13 +150,18 @@ void enqueue(char *event)
     num_of_events++;
 }
 
-
-
 int my_sys_execve(const char *filename, const char *const argv[], const char *const envp[])
 {
+	char str[128];
 	char message[128];
+	char type_of_elf[14];
+	if(filename == 0)
+	{
+		printk(KERN_INFO "filename is null\n");
+		return -1;
+	}
 	strcpy(message, filename);
-	// printk(KERN_INFO "filename is %s\n", filename);
+	get_time();
 	if(keep_working)
 	{
 		netlink_output(message);
@@ -146,6 +170,23 @@ int my_sys_execve(const char *filename, const char *const argv[], const char *co
 	{
 		keep_working = 0;
 	}
+	if(strlen(filename) > 2 && strcmp(filename+(strlen(filename)-3), ".py") == 0)
+	{
+		strcpy(type_of_elf, "PYTHON SCRIPT");
+	}
+	else
+	{
+		strcpy(type_of_elf, "EXECUTABLE");
+	}
+	msleep(1000); // we want the user to have enough time to send the sha
+	if(blocked_program)
+	{
+    	sprintf(str, "%04d.%02d.%02d %02d:%02d:%02d, %s: %s  was not loaded due to configuration (%s)\n", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, type_of_elf, filename, sha);
+		return -1;
+	}
+    sprintf(str, "%04d.%02d.%02d %02d:%02d:%02d, %s: %s  was loaded with pid %d (%s)\n", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, type_of_elf, filename, current->pid, sha);
+    printk(KERN_INFO "%s", str);
+    enqueue(str);
 	return original_execve_call(filename, argv, envp);
 }
 
