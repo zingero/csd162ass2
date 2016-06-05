@@ -35,11 +35,11 @@ static int len_check = 1;
 
 struct sock *nl_sk = NULL;
 
-/* monitoring flags */
-int exec_monitoring = 0;
-int exec_blocking = 0;
-int script_monitoring = 0;
-int script_blocking = 0;
+// monitoring flags. we init with 1 because we want to monitor and block everything that the user runs at first
+int exec_monitoring = 1;
+int exec_blocking = 1;
+int script_monitoring = 1;
+int script_blocking = 1;
 
 int first_time = 1;
 int keep_working = 1;
@@ -52,9 +52,34 @@ int blocked_program = 0;
 int num_of_events = 0;
 char events[MAX_EVENTS][BUF_SIZE];
 
+/* -------------------------------------- linked list BEGINS ---------------------------------------------------- */
+typedef struct Link
+{
+	char* value;
+	char* name;
+	struct Link* next;
+} Link;
+
+typedef struct List
+{
+	int counter;
+	Link* head;
+} List; 
+int isExists(List *list);
+Link* search(List *list);
+List* addLink(List *list1, char* str);
+Link* addToTail(List *list, Link *new);
+void init_list(List*);
+void free_list(List *log);
+void free_link(Link *link);
+
+List *exec_hashes;
+List *scripts_hashes;
+
+/* -------------------------------------- linked list ENDS ---------------------------------------------------- */
+
 unsigned long **find_sys_call_table(void);
 void **syscall_table;
-
 long(* original_execve_call)(const char *filename, const char *const argv[], const char *const envp[]);
 
 struct rtc_time tm;
@@ -64,6 +89,8 @@ unsigned long local_time;
 struct nlmsghdr *nlh;
 int portid;
 struct sk_buff *skb_out;
+
+int isELF = 0;
 char *sha;
 
 void netlink_output(char * filename)
@@ -89,18 +116,15 @@ void netlink_output(char * filename)
 
 void isBlockedProgram(void)
 {
-	// TODO: Orian: waiting for Oshrat to finish her data structure
-
-	//int i = 0;
-	// for(; i <  ; ++i)
-	// {
-	// 	if(strcmp(char, [i]) == 0)
-	// 		{
-	// 			blocked_program = 1;
-	// 			return;
-	// 		}
-	// }
-	blocked_program = 0;
+	List * list = NULL;
+	if(isELF)
+		list = exec_hashes;
+	else
+		list = scripts_hashes;
+	if(isExists(list))
+		blocked_program = 1;
+	else
+		blocked_program = 0;
 }
 
 static void netlink_input(struct sk_buff *skb)
@@ -119,6 +143,96 @@ void get_time(void)
 	do_gettimeofday(&time);
 	local_time = (u32)(time.tv_sec - (sys_tz.tz_minuteswest * 60));
 	rtc_time_to_tm(local_time, &tm);
+}
+
+int isExists(List *list)
+{
+	return (search(list) != 0);
+}
+
+Link* search(List *list)
+{
+	Link *temp;
+	Link *ans = NULL;
+	if(list == NULL)
+		return NULL;
+	temp = list->head;
+	if(temp != 0)
+	{
+		while(strcmp(temp->name, sha) != 0 && temp->next != 0)
+		{
+			temp = temp->next;
+		}
+		if(strncmp(temp->name, sha, strlen(temp->name)) == 0)
+		{
+			ans = temp;
+		}
+	}
+	return ans;
+}
+
+List * addLink(List *list, char* str)
+{
+	Link *new = kmalloc(sizeof(Link), GFP_KERNEL);
+	new->value = str;
+	new->next = NULL;
+	if(!list->head)
+	{
+		list->head = new;
+		list->counter = 1;
+	}
+	else
+	{
+		list->head = addToTail(list, new);
+	    list->counter++;
+	}
+	return list;
+}
+
+Link * addToTail(List *list, Link *new)
+{
+	Link *temp;
+	if(list == NULL)
+		return NULL;
+	temp = list->head;
+	while(temp->next != NULL)
+	{
+		temp = temp->next;
+	}
+	temp->next = new;
+	return list->head;
+}
+
+void init_list(List *uninit_list)
+{
+    List *list = kmalloc(sizeof(list), GFP_KERNEL);
+	list->counter = 0;
+  	list->head = NULL;
+  	uninit_list = list;
+}
+
+void free_list(List * log) 
+{
+	Link* curr;
+	Link* tmp;
+	if(log == NULL)
+		return;
+	curr = log->head;
+	while (curr != 0) 
+    {
+	  tmp = curr;
+	  curr = curr->next;
+	  free_link(tmp);
+	}
+	kfree(log); 
+}
+
+void free_link(Link *link) 
+{
+	if(link == NULL)
+		return;
+	kfree(link->value);
+	kfree(link);
 }
 
 void dequeue(void)
@@ -152,41 +266,50 @@ void enqueue(char *event)
 
 int my_sys_execve(const char *filename, const char *const argv[], const char *const envp[])
 {
-	char str[128];
+	char entry[128];
 	char message[128];
 	char type_of_elf[14];
 	if(filename == 0)
 	{
-		printk(KERN_INFO "filename is null\n");
-		return -1;
+		printk(KERN_INFO "ERROR: Filename is null\n");
+		return original_execve_call(filename, argv, envp);
+	}
+	if(strlen(filename) > 2 && strcmp(filename+(strlen(filename)-3), ".py") == 0)
+	{
+		if(!script_monitoring)
+			return original_execve_call(filename, argv, envp);
+		strcpy(type_of_elf, "PYTHON SCRIPT");
+		isELF = 0;
+	}
+	else
+	{
+		if(!exec_monitoring)
+			return original_execve_call(filename, argv, envp);
+		strcpy(type_of_elf, "EXECUTABLE");
+		isELF = 1;
 	}
 	strcpy(message, filename);
 	get_time();
 	if(keep_working)
 	{
-		netlink_output(message);
+		if((*type_of_elf == 'P' && script_blocking) || (*type_of_elf == 'E' && exec_blocking))
+		{
+			netlink_output(message);
+		}
 	}
 	if(strcmp(filename, "./unload.sh") == 0)
 	{
 		keep_working = 0;
 	}
-	if(strlen(filename) > 2 && strcmp(filename+(strlen(filename)-3), ".py") == 0)
-	{
-		strcpy(type_of_elf, "PYTHON SCRIPT");
-	}
-	else
-	{
-		strcpy(type_of_elf, "EXECUTABLE");
-	}
-	msleep(1000); // we want the user to have enough time to send the sha
+	msleep(1000); // we want the user to have enough time to send the sha // TODO: CHANGE TO SEMAPHORE
 	if(blocked_program)
 	{
-    	sprintf(str, "%04d.%02d.%02d %02d:%02d:%02d, %s: %s  was not loaded due to configuration (%s)\n", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, type_of_elf, filename, sha);
+    	sprintf(entry, "%04d.%02d.%02d %02d:%02d:%02d, %s: %s  was not loaded due to configuration (%s)\n", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, type_of_elf, filename, sha);
 		return -1;
 	}
-    sprintf(str, "%04d.%02d.%02d %02d:%02d:%02d, %s: %s  was loaded with pid %d (%s)\n", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, type_of_elf, filename, current->pid, sha);
-    printk(KERN_INFO "%s", str);
-    enqueue(str);
+    sprintf(entry, "%04d.%02d.%02d %02d:%02d:%02d, %s: %s  was loaded with pid %d (%s)\n", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, type_of_elf, filename, current->pid, sha);
+    printk(KERN_INFO "%s", entry);
+    enqueue(entry);
 	return original_execve_call(filename, argv, envp);
 }
 
@@ -233,15 +356,25 @@ void print_conf(void)
 
 void print_hashes_execs(void)
 {
-
+  	Link *curr = exec_hashes->head;
+	while (curr != 0) 
+    {
+		printk(KERN_INFO "%s", curr->value);
+		curr = curr->next;
+	}
 }
 
 void print_hashes_scripts(void)
 {
-
+	Link *curr = scripts_hashes->head;
+	while (curr != 0) 
+    {
+		printk(KERN_INFO "%s", curr->value);
+		curr = curr->next;
+	}
 }
 
-ssize_t fops_read(struct file *sp_file,char __user *buf, size_t size, loff_t *offset)
+ssize_t fops_read(struct file *sp_file, char __user *buf, size_t size, loff_t *offset)
 {
 	if (len_check)
 	 len_check = 0;
@@ -324,10 +457,10 @@ ssize_t fops_write(struct file *sp_file,const char __user *buf, size_t size, lof
 			    printk(KERN_DEBUG "Error: cannot parse string.\n");
 			}
 			break;
-	    case 'A':
+	    case 'A': // add 8 for start of sha
 	    	printk(KERN_INFO "'A' case in writing\n");
 	    	break;
-	    case 'D':
+	    case 'D': // add 8 for start of sha
 	    	printk(KERN_INFO "'D' case in writing\n");
 			break;
 	    default:
@@ -406,6 +539,9 @@ static int __init init_kblocker (void)
         return -10;
     }
 
+    init_list(exec_hashes);
+	init_list(scripts_hashes);
+
     write_cr0(cr0);
     return 0;	
 }
@@ -417,7 +553,6 @@ static void __exit exit_kblocker(void)
 
     cr0 = read_cr0();
     write_cr0(cr0 & ~CR0_WP);
-    
 
 	ptr = memchr(syscall_table[__NR_execve], 0xE8, 200);
 	if(!ptr++)
@@ -428,6 +563,9 @@ static void __exit exit_kblocker(void)
     remove_proc_entry("KBlocker",NULL);
 
     netlink_kernel_release(nl_sk);
+
+	free_list(exec_hashes);
+	free_list(scripts_hashes);
 
     write_cr0(cr0);
     printk(KERN_INFO "exit KBlockerfs\n");
