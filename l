@@ -1,5 +1,5 @@
 make clean
-rm netlink_user
+rm KBlockerUM
 clear
 make
-gcc -o netlink_user netlinkUser.c
+gcc -o KBlockerUM KBlockerUM.c

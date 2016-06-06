@@ -1,0 +1,4 @@
+BUGS
+1. python last chars filename in my_sys_exec
+2. 32/64 bit change of system call
+3. sleeping for 1 second
