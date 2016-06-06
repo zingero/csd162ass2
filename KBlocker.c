@@ -457,11 +457,17 @@ ssize_t fops_write(struct file *sp_file,const char __user *buf, size_t size, lof
 			    printk(KERN_DEBUG "Error: cannot parse string.\n");
 			}
 			break;
-	    case 'A': // add 8 for start of sha
+	    case 'A':
 	    	printk(KERN_INFO "'A' case in writing\n");
+	    	char new_sha[256];
+	    	strcpy(new_sha, msg + 8);
+	    	// TODO: add to hashes list
 	    	break;
-	    case 'D': // add 8 for start of sha
+	    case 'D':
 	    	printk(KERN_INFO "'D' case in writing\n");
+			char new_sha[256];
+	    	strcpy(new_sha, msg + 8);
+	    	// TODO: add to hashes list
 			break;
 	    default:
 		printk(KERN_DEBUG "Error: cannot parse string.\n");
