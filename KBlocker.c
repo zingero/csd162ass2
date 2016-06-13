@@ -19,6 +19,7 @@
 #include <linux/kthread.h>
 #include <linux/wait.h>
 #include <linux/slab.h>
+#include <linux/semaphore.h>
 
 #define NETLINK_USER 31
 // Write Protect Bit (CR0:16)
@@ -89,6 +90,7 @@ unsigned long local_time;
 struct nlmsghdr *nlh;
 int portid;
 struct sk_buff *skb_out;
+struct semaphore sem;
 
 int isELF = 0;
 char *sha;
@@ -135,7 +137,8 @@ static void netlink_input(struct sk_buff *skb)
 
     if(nlh->nlmsg_pid != 0)
     	portid = nlh->nlmsg_pid; //portid of sending process
-    printk(KERN_INFO "KERNEL GOT:%s\n", sha);
+    printk(KERN_INFO "KERNEL GOT:%s. length = %d\n", sha, (int)strlen(sha));
+    up(&sem);
 }
 
 void get_time(void)
@@ -269,24 +272,46 @@ int my_sys_execve(const char *filename, const char *const argv[], const char *co
 	char entry[128];
 	char message[128];
 	char type_of_elf[14];
+	char file_type[5];
+	struct file *file;
+    mm_segment_t fs;
+    int i;
+    int isELF;
+    char elf_type[] = {0x7f, 0x45, 0x4c, 0x46, 0x00};
+	//down(&sem);
 	if(filename == 0)
 	{
 		printk(KERN_INFO "ERROR: Filename is null\n");
 		return original_execve_call(filename, argv, envp);
 	}
-	if(strlen(filename) > 2 && strcmp(filename+(strlen(filename)-3), ".py") == 0)
-	{
-		if(!script_monitoring)
-			return original_execve_call(filename, argv, envp);
-		strcpy(type_of_elf, "PYTHON SCRIPT");
-		isELF = 0;
-	}
-	else
+	file = filp_open(filename, O_RDONLY, 0);
+	if(!file)
+    {
+    	printk(KERN_ALERT "ERROR: Can not open file\n");
+    	return -1;
+    }
+    for(i = 0 ; i < 5 ; i++)
+    {
+        file_type[i] = 0;
+    }
+    fs = get_fs(); // Get current segment descriptor
+    set_fs(get_ds()); // Set segment descriptor associated to kernel space
+    file->f_op->read(file, file_type, 4, &file->f_pos); // Read the file    
+    set_fs(fs); // Restore segment descriptor
+    filp_close(file,NULL); // See what we read from file
+	if(strcmp(file_type, elf_type) == 0)
 	{
 		if(!exec_monitoring)
 			return original_execve_call(filename, argv, envp);
 		strcpy(type_of_elf, "EXECUTABLE");
 		isELF = 1;
+	}
+	else
+	{
+		if(!script_monitoring)
+			return original_execve_call(filename, argv, envp);
+		strcpy(type_of_elf, "PYTHON SCRIPT");
+		isELF = 0; 
 	}
 	strcpy(message, filename);
 	get_time();
@@ -301,13 +326,13 @@ int my_sys_execve(const char *filename, const char *const argv[], const char *co
 	{
 		keep_working = 0;
 	}
-	msleep(1000); // we want the user to have enough time to send the sha // TODO: CHANGE TO SEMAPHORE
+	msleep(100); // we want the user to have enough time to send the sha // TODO: CHANGE TO SEMAPHORE
 	if(blocked_program)
 	{
-    	sprintf(entry, "%04d.%02d.%02d %02d:%02d:%02d, %s: %s  was not loaded due to configuration (%s)\n", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, type_of_elf, filename, sha);
+    	sprintf(entry, "%04d.%02d.%02d %02d:%02d:%02d, %s: %s was not loaded due to configuration (%s)\n", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, type_of_elf, filename, sha);
 		return -1;
 	}
-    sprintf(entry, "%04d.%02d.%02d %02d:%02d:%02d, %s: %s  was loaded with pid %d (%s)\n", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, type_of_elf, filename, current->pid, sha);
+    sprintf(entry, "%04d.%02d.%02d %02d:%02d:%02d, %s: %s was loaded with pid %d (%s)\n", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, type_of_elf, filename, current->pid, sha);
     printk(KERN_INFO "%s", entry);
     enqueue(entry);
 	return original_execve_call(filename, argv, envp);
@@ -459,14 +484,14 @@ ssize_t fops_write(struct file *sp_file,const char __user *buf, size_t size, lof
 			break;
 	    case 'A':
 	    	printk(KERN_INFO "'A' case in writing\n");
-	    	char new_sha[256];
-	    	strcpy(new_sha, msg + 8);
+	    	// char new_sha[256];
+	    	// strcpy(new_sha, msg + 8);
 	    	// TODO: add to hashes list
 	    	break;
 	    case 'D':
 	    	printk(KERN_INFO "'D' case in writing\n");
-			char new_sha[256];
-	    	strcpy(new_sha, msg + 8);
+			// char new_sha[256];
+	    	// strcpy(new_sha, msg + 8);
 	    	// TODO: add to hashes list
 			break;
 	    default:
@@ -503,7 +528,8 @@ static int __init init_kblocker (void)
   	unsigned long cr0;
   	char *ptr = NULL;
   
-    struct netlink_kernel_cfg cfg = {
+    struct netlink_kernel_cfg cfg = 
+    {
         .input = netlink_input,
     };
   	printk(KERN_INFO "init KBlockerfs\n");
@@ -523,7 +549,7 @@ static int __init init_kblocker (void)
         return -1;
     }
     
-    // printk(KERN_DEBUG "Found the sys_call_table at %16lx.\n", (unsigned long) syscall_table);
+	sema_init(&sem, 1); // this initials the semaphore with 1 keys.
 
     cr0 = read_cr0();
     write_cr0(cr0 & ~CR0_WP);
@@ -556,7 +582,6 @@ static void __exit exit_kblocker(void)
 {
     char *ptr = 0;
     unsigned long cr0;
-
     cr0 = read_cr0();
     write_cr0(cr0 & ~CR0_WP);
 
