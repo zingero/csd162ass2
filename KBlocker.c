@@ -66,16 +66,19 @@ typedef struct List
 	int counter;
 	Link* head;
 } List; 
-int isExists(List *list);
-Link* search(List *list);
+Link* findPrevious(List* list, Link* curr);
+int isExists(List *list, char* str);
+Link* search(List *list, char* str);
 List* addLink(List *list1, char* str);
 Link* addToTail(List *list, Link *new);
 void init_list(List*);
 void free_list(List *log);
 void free_link(Link *link);
+void deleteLink(Link *link);
 
-List *exec_hashes;
-List *scripts_hashes;
+//List *exec_hashes;
+//List *scripts_hashes;
+List sha_list;
 
 /* -------------------------------------- linked list ENDS ---------------------------------------------------- */
 
@@ -118,12 +121,12 @@ void netlink_output(char * filename)
 
 void isBlockedProgram(void)
 {
-	List * list = NULL;
-	if(isELF)
+	List * list = sha_list;
+	/*if(isELF)
 		list = exec_hashes;
 	else
-		list = scripts_hashes;
-	if(isExists(list))
+		list = scripts_hashes;*/
+	if(isExists(list, sha))
 		blocked_program = 1;
 	else
 		blocked_program = 0;
@@ -148,11 +151,25 @@ void get_time(void)
 	rtc_time_to_tm(local_time, &tm);
 }
 
-int isExists(List *list)
-{
-	return (search(list) != 0);
+Link* findPrevious(List* list, Link* curr){
+  Link* temp = 0;
+  if(curr != (list->head)){
+    while(((list->head)->next)-> value != curr->value ){
+      list->head = (list->head)->next;
+    }
+    if(((list->head)->next)-> value == curr->value){
+      temp = list->head;
+    }
+  }
+  return temp;
 }
 
+int isExists(List *list, char* str)
+{
+	return (search(list, str) != 0);
+}
+
+/*
 Link* search(List *list)
 {
 	Link *temp;
@@ -173,21 +190,39 @@ Link* search(List *list)
 	}
 	return ans;
 }
+*/
+
+Link* search(List *list, char* str){
+  Link *temp = list->head;
+  Link *ans = NULL;
+  if(temp != 0){
+    while(strcmp(temp->name, str) != 0 && temp->next != 0){
+      temp = temp->next;
+    }
+    if(strncmp(temp->name, str, strlen(temp->name)) == 0){
+      ans= temp;
+    }
+  }
+  return ans;
+}
+
 
 List * addLink(List *list, char* str)
 {
-	Link *new = kmalloc(sizeof(Link), GFP_KERNEL);
-	new->value = str;
-	new->next = NULL;
-	if(!list->head)
-	{
-		list->head = new;
-		list->counter = 1;
-	}
-	else
-	{
-		list->head = addToTail(list, new);
-	    list->counter++;
+	 if(!isExists(list, str)){
+		Link *new = kmalloc(sizeof(Link), GFP_KERNEL);
+		new->value = str;
+		new->next = NULL;
+		if(!list->head)
+		{
+			list->head = new;
+			list->counter = 1;
+		}
+		else
+		{
+			list->head = addToTail(list, new);
+		    list->counter++;
+		}
 	}
 	return list;
 }
@@ -236,6 +271,14 @@ void free_link(Link *link)
 		return;
 	kfree(link->value);
 	kfree(link);
+}
+
+void deleteLink(Link *link){
+    Link *previous = findPrevious(sha_list, link);
+	if(previous != NULL){
+	    previous->next = link->next;
+    }
+    free_link(link);
 }
 
 void dequeue(void)
@@ -379,6 +422,16 @@ void print_conf(void)
 		printk(KERN_INFO "Script Blocking - Disabled\n");
 }
 
+void print_hashes(void)
+{
+  	Link *curr = sha_list->head;
+	while (curr != 0) 
+    {
+		printk(KERN_INFO "%s", curr->value);
+		curr = curr->next;
+	}
+}
+/*
 void print_hashes_execs(void)
 {
   	Link *curr = exec_hashes->head;
@@ -398,7 +451,7 @@ void print_hashes_scripts(void)
 		curr = curr->next;
 	}
 }
-
+*/
 ssize_t fops_read(struct file *sp_file, char __user *buf, size_t size, loff_t *offset)
 {
 	if (len_check)
@@ -414,16 +467,19 @@ ssize_t fops_read(struct file *sp_file, char __user *buf, size_t size, loff_t *o
 	print_events();
 	printk(KERN_INFO "KBlocker Current Configuration:\n");
 	print_conf();
-	printk(KERN_INFO "SHA256 hashes to block (Executables)\n");
+	/*printk(KERN_INFO "SHA256 hashes to block (Executables)\n");
 	print_hashes_execs();
 	printk(KERN_INFO "SHA256 hashes to block (Python Scripts)\n");
-	print_hashes_scripts();
+	print_hashes_scripts();*/
+	printk(KERN_INFO "SHA256 hashes to block:\n");
+	print_hashes();
 	return len;
 }
 
 /* write controling: parsing user preferences and LKM definition*/
 ssize_t fops_write(struct file *sp_file,const char __user *buf, size_t size, loff_t *offset)
 {
+	char new_sha[256];
 	printk(KERN_INFO "proc called write %d\n",(int)size);
 	if(size > 14)
 	{
@@ -482,17 +538,15 @@ ssize_t fops_write(struct file *sp_file,const char __user *buf, size_t size, lof
 			    printk(KERN_DEBUG "Error: cannot parse string.\n");
 			}
 			break;
-	    case 'A':
+	    case 'A': //add
 	    	printk(KERN_INFO "'A' case in writing\n");
-	    	// char new_sha[256];
-	    	// strcpy(new_sha, msg + 8);
-	    	// TODO: add to hashes list
+	    	strcpy(new_sha, msg + 8);
+	    	addLink(sha_list, new_sha);
 	    	break;
 	    case 'D':
 	    	printk(KERN_INFO "'D' case in writing\n");
-			// char new_sha[256];
-	    	// strcpy(new_sha, msg + 8);
-	    	// TODO: add to hashes list
+	    	strcpy(new_sha, msg + 8);
+	    	deleteLink(search(sha_list, new_sha));
 			break;
 	    default:
 		printk(KERN_DEBUG "Error: cannot parse string.\n");
@@ -571,8 +625,9 @@ static int __init init_kblocker (void)
         return -10;
     }
 
-    init_list(exec_hashes);
-	init_list(scripts_hashes);
+    // init_list(exec_hashes);
+	//init_list(scripts_hashes);
+	init_list(sha_list);
 
     write_cr0(cr0);
     return 0;	
@@ -595,8 +650,9 @@ static void __exit exit_kblocker(void)
 
     netlink_kernel_release(nl_sk);
 
-	free_list(exec_hashes);
-	free_list(scripts_hashes);
+	//free_list(exec_hashes);
+	//free_list(scripts_hashes);
+	free_list(sha_list);
 
     write_cr0(cr0);
     printk(KERN_INFO "exit KBlockerfs\n");
