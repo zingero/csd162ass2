@@ -19,6 +19,7 @@
 #include <linux/kthread.h>
 #include <linux/wait.h>
 #include <linux/slab.h>
+#include <linux/semaphore.h>
 
 #define NETLINK_USER 31
 // Write Protect Bit (CR0:16)
@@ -65,19 +66,16 @@ typedef struct List
 	int counter;
 	Link* head;
 } List; 
-Link* findPrevious(List* list, Link* curr);
-int isExists(List *list, char* str);
-Link* search(List *list, char* str);
+int isExists(List *list);
+Link* search(List *list);
 List* addLink(List *list1, char* str);
 Link* addToTail(List *list, Link *new);
 void init_list(List*);
 void free_list(List *log);
 void free_link(Link *link);
-void deleteLink(Link *link);
 
-//List *exec_hashes;
-//List *scripts_hashes;
-List *sha_list;
+List *exec_hashes;
+List *scripts_hashes;
 
 /* -------------------------------------- linked list ENDS ---------------------------------------------------- */
 
@@ -92,6 +90,7 @@ unsigned long local_time;
 struct nlmsghdr *nlh;
 int portid;
 struct sk_buff *skb_out;
+struct semaphore sem;
 
 int isELF = 0;
 char *sha;
@@ -119,12 +118,12 @@ void netlink_output(char * filename)
 
 void isBlockedProgram(void)
 {
-	List * list = sha_list;
-	/*if(isELF)
+	List * list = NULL;
+	if(isELF)
 		list = exec_hashes;
 	else
-		list = scripts_hashes;*/
-	if(isExists(list, sha))
+		list = scripts_hashes;
+	if(isExists(list))
 		blocked_program = 1;
 	else
 		blocked_program = 0;
@@ -138,7 +137,8 @@ static void netlink_input(struct sk_buff *skb)
 
     if(nlh->nlmsg_pid != 0)
     	portid = nlh->nlmsg_pid; //portid of sending process
-    printk(KERN_INFO "KERNEL GOT:%s\n", sha);
+    printk(KERN_INFO "KERNEL GOT:%s. length = %d\n", sha, (int)strlen(sha));
+    up(&sem);
 }
 
 void get_time(void)
@@ -148,28 +148,11 @@ void get_time(void)
 	rtc_time_to_tm(local_time, &tm);
 }
 
-
-Link* findPrevious(List* list, Link* curr){
-  Link* temp = 0;
-  if(curr != (list->head)){
-    while(((list->head)->next)-> value != curr->value ){
-      list->head = (list->head)->next;
-    }
-    if(((list->head)->next)-> value == curr->value){
-      temp = list->head;
-    }
-  }
-  return temp;
-}
-
-
-int isExists(List *list, char* str)
+int isExists(List *list)
 {
-	return (search(list, str) != 0);
+	return (search(list) != 0);
 }
 
-
-/*
 Link* search(List *list)
 {
 	Link *temp;
@@ -190,37 +173,21 @@ Link* search(List *list)
 	}
 	return ans;
 }
-*/
 
-Link* search(List *list, char* str){
-  Link *temp = list->head;
-  Link *ans = NULL;
-  if(temp != 0){
-    while(strcmp(temp->name, str) != 0 && temp->next != 0){
-      temp = temp->next;
-    }
-    if(strncmp(temp->name, str, strlen(temp->name)) == 0){
-      ans= temp;
-    }
-  }
-  return ans;
-}
 List * addLink(List *list, char* str)
 {
-	if(!isExists(list, str)){
-		Link *new = kmalloc(sizeof(Link), GFP_KERNEL);
-		new->value = str;
-		new->next = NULL;
-		if(!list->head)
-		{
-			list->head = new;
-			list->counter = 1;
-		}
-		else
-		{
-			list->head = addToTail(list, new);
-		    list->counter++;
-		}
+	Link *new = kmalloc(sizeof(Link), GFP_KERNEL);
+	new->value = str;
+	new->next = NULL;
+	if(!list->head)
+	{
+		list->head = new;
+		list->counter = 1;
+	}
+	else
+	{
+		list->head = addToTail(list, new);
+	    list->counter++;
 	}
 	return list;
 }
@@ -271,14 +238,6 @@ void free_link(Link *link)
 	kfree(link);
 }
 
-void deleteLink(Link *link){
-	Link *previous = findPrevious(sha_list, link);
-	if(previous != NULL){
-		previous->next = link->next;
-	}
-	free_link(link);
-}
-
 void dequeue(void)
 {
     int i;
@@ -313,71 +272,46 @@ int my_sys_execve(const char *filename, const char *const argv[], const char *co
 	char entry[128];
 	char message[128];
 	char type_of_elf[14];
+	char file_type[5];
 	struct file *file;
-	char buf[128];
     mm_segment_t fs;
     int i;
-   
-    for(i=0;i<128;i++){
-        buf[i] = 0;
-    }
-	
-	//char ELF_start[4];
-	//char Python_start[17];
-	//fread(ELF_start, 1, 4, filename);
-	//fread(Python_start, 1, 17, filename);
-	file = filp_open(filename, O_RDONLY, 0);
-	if(!file)
-        printk(KERN_ALERT "filp_open error!\n");
-    else{
-        // Get current segment descriptor
-        fs = get_fs();
-        // Set segment descriptor associated to kernel space
-        set_fs(get_ds());
-        // Read the file
-        file->f_op->read(file, buf, 4, &file->f_pos);
-
-		if(strcmp(buf, "7F454C46") == 0){
-			printk("!!!\n");
-				isELF = 1;
-			}
-
-
-        // Restore segment descriptor
-        set_fs(fs);
-        // See what we read from file
-        printk(KERN_INFO "buf:%s\n",buf);
-    }
-    filp_close(file,NULL);
-/*	if(strcmp(ELF_start, "7F454C46") == 0){
-		isELF = 1;
-	}
-	else if(strcmp(ELF_start, "23212F7573 72 2F 62 69 6E 2F 70 79 74 68 6F 6E") == 0){
-		isELF = 0;
-	}*/
-
-
-
-
-
+    int isELF;
+    char elf_type[] = {0x7f, 0x45, 0x4c, 0x46, 0x00};
+	//down(&sem);
 	if(filename == 0)
 	{
 		printk(KERN_INFO "ERROR: Filename is null\n");
 		return original_execve_call(filename, argv, envp);
 	}
-	if(strlen(filename) > 2 && strcmp(filename+(strlen(filename)-3), ".py") == 0)
-	{
-		if(!script_monitoring)
-			return original_execve_call(filename, argv, envp);
-		strcpy(type_of_elf, "PYTHON SCRIPT");
-		isELF = 0;
-	}
-	else
+	file = filp_open(filename, O_RDONLY, 0);
+	if(!file)
+    {
+    	printk(KERN_ALERT "ERROR: Can not open file\n");
+    	return -1;
+    }
+    for(i = 0 ; i < 5 ; i++)
+    {
+        file_type[i] = 0;
+    }
+    fs = get_fs(); // Get current segment descriptor
+    set_fs(get_ds()); // Set segment descriptor associated to kernel space
+    file->f_op->read(file, file_type, 4, &file->f_pos); // Read the file    
+    set_fs(fs); // Restore segment descriptor
+    filp_close(file,NULL); // See what we read from file
+	if(strcmp(file_type, elf_type) == 0)
 	{
 		if(!exec_monitoring)
 			return original_execve_call(filename, argv, envp);
 		strcpy(type_of_elf, "EXECUTABLE");
 		isELF = 1;
+	}
+	else
+	{
+		if(!script_monitoring)
+			return original_execve_call(filename, argv, envp);
+		strcpy(type_of_elf, "PYTHON SCRIPT");
+		isELF = 0; 
 	}
 	strcpy(message, filename);
 	get_time();
@@ -392,13 +326,13 @@ int my_sys_execve(const char *filename, const char *const argv[], const char *co
 	{
 		keep_working = 0;
 	}
-	msleep(1000); // we want the user to have enough time to send the sha // TODO: CHANGE TO SEMAPHORE
+	msleep(100); // we want the user to have enough time to send the sha // TODO: CHANGE TO SEMAPHORE
 	if(blocked_program)
 	{
-    	sprintf(entry, "%04d.%02d.%02d %02d:%02d:%02d, %s: %s  was not loaded due to configuration (%s)\n", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, type_of_elf, filename, sha);
+    	sprintf(entry, "%04d.%02d.%02d %02d:%02d:%02d, %s: %s was not loaded due to configuration (%s)\n", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, type_of_elf, filename, sha);
 		return -1;
 	}
-    sprintf(entry, "%04d.%02d.%02d %02d:%02d:%02d, %s: %s  was loaded with pid %d (%s)\n", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, type_of_elf, filename, current->pid, sha);
+    sprintf(entry, "%04d.%02d.%02d %02d:%02d:%02d, %s: %s was loaded with pid %d (%s)\n", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, type_of_elf, filename, current->pid, sha);
     printk(KERN_INFO "%s", entry);
     enqueue(entry);
 	return original_execve_call(filename, argv, envp);
@@ -445,17 +379,6 @@ void print_conf(void)
 		printk(KERN_INFO "Script Blocking - Disabled\n");
 }
 
-void print_hashes(void)
-{
-  	Link *curr = sha_list->head;
-	while (curr != 0) 
-    {
-		printk(KERN_INFO "%s", curr->value);
-		curr = curr->next;
-	}
-}
-
-/*
 void print_hashes_execs(void)
 {
   	Link *curr = exec_hashes->head;
@@ -475,7 +398,7 @@ void print_hashes_scripts(void)
 		curr = curr->next;
 	}
 }
-*/
+
 ssize_t fops_read(struct file *sp_file, char __user *buf, size_t size, loff_t *offset)
 {
 	if (len_check)
@@ -491,19 +414,16 @@ ssize_t fops_read(struct file *sp_file, char __user *buf, size_t size, loff_t *o
 	print_events();
 	printk(KERN_INFO "KBlocker Current Configuration:\n");
 	print_conf();
-	//printk(KERN_INFO "SHA256 hashes to block (Executables)\n");
-	//print_hashes_execs();
-	printk(KERN_INFO "SHA256 hashes to block:\n");
-	print_hashes();
-	//printk(KERN_INFO "SHA256 hashes to block (Python Scripts)\n");
-	//print_hashes_scripts();
+	printk(KERN_INFO "SHA256 hashes to block (Executables)\n");
+	print_hashes_execs();
+	printk(KERN_INFO "SHA256 hashes to block (Python Scripts)\n");
+	print_hashes_scripts();
 	return len;
 }
 
 /* write controling: parsing user preferences and LKM definition*/
 ssize_t fops_write(struct file *sp_file,const char __user *buf, size_t size, loff_t *offset)
 {
-	char new_sha[256];
 	printk(KERN_INFO "proc called write %d\n",(int)size);
 	if(size > 14)
 	{
@@ -514,7 +434,7 @@ ssize_t fops_write(struct file *sp_file,const char __user *buf, size_t size, lof
 	copy_from_user(msg,buf,len);
 	switch(*msg)
 	{	
-	    case 'E': //execute
+	    case 'E':
 			if(*(msg + 4) == 'M')
 			{
 				if(*(msg + 8) == '1')
@@ -538,7 +458,7 @@ ssize_t fops_write(struct file *sp_file,const char __user *buf, size_t size, lof
 			    printk(KERN_DEBUG "Error: cannot parse string.\n");
 			}
 			break;
-	    case 'S': //python script
+	    case 'S':
 			if(*(msg + 6) == 'M')
 			{
 				if(*(msg + 10) == '1')
@@ -562,20 +482,17 @@ ssize_t fops_write(struct file *sp_file,const char __user *buf, size_t size, lof
 			    printk(KERN_DEBUG "Error: cannot parse string.\n");
 			}
 			break;
-	    case 'A': //add
+	    case 'A':
 	    	printk(KERN_INFO "'A' case in writing\n");
-	    	
-	    	strcpy(new_sha, msg + 8);
+	    	// char new_sha[256];
+	    	// strcpy(new_sha, msg + 8);
 	    	// TODO: add to hashes list
-	    	addLink(sha_list, new_sha);
-
 	    	break;
-	    case 'D'://delete
+	    case 'D':
 	    	printk(KERN_INFO "'D' case in writing\n");
-			//char new_sha[256];
-	    	strcpy(new_sha, msg + 8);
+			// char new_sha[256];
+	    	// strcpy(new_sha, msg + 8);
 	    	// TODO: add to hashes list
-	    	deleteLink(search(sha_list, new_sha));
 			break;
 	    default:
 		printk(KERN_DEBUG "Error: cannot parse string.\n");
@@ -611,7 +528,8 @@ static int __init init_kblocker (void)
   	unsigned long cr0;
   	char *ptr = NULL;
   
-    struct netlink_kernel_cfg cfg = {
+    struct netlink_kernel_cfg cfg = 
+    {
         .input = netlink_input,
     };
   	printk(KERN_INFO "init KBlockerfs\n");
@@ -631,7 +549,7 @@ static int __init init_kblocker (void)
         return -1;
     }
     
-    // printk(KERN_DEBUG "Found the sys_call_table at %16lx.\n", (unsigned long) syscall_table);
+	sema_init(&sem, 1); // this initials the semaphore with 1 keys.
 
     cr0 = read_cr0();
     write_cr0(cr0 & ~CR0_WP);
@@ -653,9 +571,8 @@ static int __init init_kblocker (void)
         return -10;
     }
 
-    //init_list(exec_hashes);
-	//init_list(scripts_hashes);
-	init_list(sha_list);
+    init_list(exec_hashes);
+	init_list(scripts_hashes);
 
     write_cr0(cr0);
     return 0;	
@@ -665,7 +582,6 @@ static void __exit exit_kblocker(void)
 {
     char *ptr = 0;
     unsigned long cr0;
-
     cr0 = read_cr0();
     write_cr0(cr0 & ~CR0_WP);
 
@@ -679,9 +595,8 @@ static void __exit exit_kblocker(void)
 
     netlink_kernel_release(nl_sk);
 
-	//free_list(exec_hashes);
-	//free_list(scripts_hashes);
-	free_list(sha_list);
+	free_list(exec_hashes);
+	free_list(scripts_hashes);
 
     write_cr0(cr0);
     printk(KERN_INFO "exit KBlockerfs\n");
