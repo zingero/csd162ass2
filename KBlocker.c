@@ -78,7 +78,7 @@ void deleteLink(Link *link);
 
 //List *exec_hashes;
 //List *scripts_hashes;
-List sha_list;
+List *sha_list;
 
 /* -------------------------------------- linked list ENDS ---------------------------------------------------- */
 
