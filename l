@@ -2,4 +2,4 @@ make clean
 rm KBlockerUM
 clear
 make
-gcc -o KBlockerUM KBlockerUM.c
+gcc KBlockerUM.c -lcrypto -o KBlockerUM
