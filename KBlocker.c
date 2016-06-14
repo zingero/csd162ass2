@@ -96,6 +96,7 @@ struct sk_buff *skb_out;
 struct semaphore *sem;
 
 int isELF = 0;
+char formatted_sha[65];
 char *sha = NULL;
 
 void netlink_output(char * filename)
@@ -168,9 +169,16 @@ void isBlockedProgram(void)
 
 static void netlink_input(struct sk_buff *skb)
 {
+	int i = 0;
     nlh = (struct nlmsghdr *)skb->data;
     sha = (char *)nlmsg_data(nlh);
-    // isBlockedProgram();
+    isBlockedProgram();
+    for(i = 0 ; i < 65 ; i++)
+    {
+        formatted_sha[i] = 0;
+    }
+	if(sha != NULL)
+	strcpy(formatted_sha, sha);
 
     if(nlh->nlmsg_pid != 0)
     	portid = nlh->nlmsg_pid; //portid of sending process
@@ -331,25 +339,15 @@ void enqueue(char *event)
     num_of_events++;
 }
 
-int my_sys_execve(const char *filename, const char *const argv[], const char *const envp[])
+int type_check(char * type_of_elf, const char * filename, const char *first_argv)
 {
-	// down(sem);
-	char entry[128];
-	char message[128];
-	char type_of_elf[14];
-	char formatted_sha[65];
+	char elf_type[] = {0x7f, 0x45, 0x4c, 0x46, 0x00};
+    char script_type[] = {0x23, 0x21, 0x2f, 0x75, 0x73, 0x72, 0x2f, 0x62, 0x69, 0x6e, 0x2f, 0x70, 0x79, 0x74, 0x68, 0x6f, 0x6e, 0x00}; //#!/usr/bin/python
 	char file_type[5];
 	struct file *file;
-    mm_segment_t fs;
+	mm_segment_t fs;
     int i;
-    int isELF;
-    char elf_type[] = {0x7f, 0x45, 0x4c, 0x46, 0x00};
-	if(filename == 0)
-	{
-		printk(KERN_INFO "ERROR: Filename is null\n");
-		return original_execve_call(filename, argv, envp);
-	}
-	file = filp_open(filename, O_RDONLY, 0);
+    file = filp_open(filename, O_RDONLY, 0);
 	if(!file)
     {
     	printk(KERN_ALERT "ERROR: Can not open file\n");
@@ -359,30 +357,79 @@ int my_sys_execve(const char *filename, const char *const argv[], const char *co
     {
         file_type[i] = 0;
     }
-    for(i = 0 ; i < 65 ; i++)
+    for(i = 0 ; i < 15 ; i++)
     {
-        formatted_sha[i] = 0;
+        type_of_elf[i] = 0;
     }
     fs = get_fs(); // Get current segment descriptor
     set_fs(get_ds()); // Set segment descriptor associated to kernel space
-    file->f_op->read(file, file_type, 4, &file->f_pos); // Read the file    
+    file->f_op->read(file, file_type, 4, &file->f_pos); // Read the file    // TODO: what if there is not 4 bytes to read?
     set_fs(fs); // Restore segment descriptor
-    filp_close(file,NULL); // See what we read from file
-	if(strcmp(file_type, elf_type) == 0)
+    filp_close(file, NULL); // See what we read from file
+    if(strcmp(first_argv, "python") == 0)
 	{
-		if(!exec_monitoring)
-			return original_execve_call(filename, argv, envp);
+		strcpy(type_of_elf, "PYTHON SCRIPT");
+		return 0; 
+	}
+	else if(strcmp(file_type, elf_type) == 0)
+	{
 		strcpy(type_of_elf, "EXECUTABLE");
-		isELF = 1;
+		return 2;
+	}
+	else if(strncmp(file_type, script_type, strlen(file_type) - 1) == 0)
+	{
+		strcpy(type_of_elf, "PYTHON SCRIPT");
+		return 1;
 	}
 	else
 	{
+		strcpy(type_of_elf, "SOMETHING ELSE");
+		return 3;
+	}
+}
+
+int my_sys_execve(const char *filename, const char *const argv[], const char *const envp[])
+{
+	// down(sem);
+	char entry[128];
+	char message[128];
+	char type_of_elf[15];
+    int i;
+    int file_type; // 0 = "python <file>", 1 = "#!/usr/bin/python", 2 = ELF, 3 = soemthing else
+    
+	if(filename == 0)
+	{
+		printk(KERN_INFO "ERROR: Filename is null\n");
+		return original_execve_call(filename, argv, envp);
+	}
+	for(i = 0 ; argv[i] != 0 ; ++i)
+	{
+		printk(KERN_INFO "argv[%d] = %s\n", i, argv[i]);
+	}
+	file_type = type_check(type_of_elf, filename, argv[0]);
+	if(file_type == 0)
+	{
 		if(!script_monitoring)
 			return original_execve_call(filename, argv, envp);
-		strcpy(type_of_elf, "PYTHON SCRIPT");
-		isELF = 0; 
+		strcpy(message, argv[1]);
 	}
-	strcpy(message, filename);
+	else if(file_type == 1)
+	{
+		if(!script_monitoring)
+			return original_execve_call(filename, argv, envp);
+		strcpy(message, filename);
+	}
+	else if(file_type == 2)
+	{
+		if(!exec_monitoring)
+			return original_execve_call(filename, argv, envp);
+		strcpy(message, filename);
+	}
+	else
+	{
+		strcpy(message, filename);
+		netlink_output(message);
+	}
 	get_time();
 	if(keep_working)
 	{
@@ -396,14 +443,12 @@ int my_sys_execve(const char *filename, const char *const argv[], const char *co
 		keep_working = 0;
 	}
 	msleep(100); // we want the user to have enough time to send the sha // TODO: CHANGE TO SEMAPHORE
-	if(sha != NULL)
-		strcpy(formatted_sha, sha);
 	if(blocked_program)
 	{
-    	sprintf(entry, "%04d.%02d.%02d %02d:%02d:%02d, %s: %s was not loaded due to configuration (%s)\n", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, type_of_elf, filename, formatted_sha);
+    	sprintf(entry, "%04d.%02d.%02d %02d:%02d:%02d, %s: %s was not loaded due to configuration (%s)\n", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, type_of_elf, message, formatted_sha);
 		return -1;
 	}
-    sprintf(entry, "%04d.%02d.%02d %02d:%02d:%02d, %s: %s was loaded with pid %d (%s)\n", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, type_of_elf, filename, current->pid, formatted_sha);
+    sprintf(entry, "%04d.%02d.%02d %02d:%02d:%02d, %s: %s was loaded with pid %d (%s)\n", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, type_of_elf, message, current->pid, formatted_sha);
     printk(KERN_INFO "%s", entry);
     enqueue(entry);
 	return original_execve_call(filename, argv, envp);
