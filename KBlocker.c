@@ -93,10 +93,10 @@ unsigned long local_time;
 struct nlmsghdr *nlh;
 int portid;
 struct sk_buff *skb_out;
-struct semaphore sem;
+struct semaphore *sem;
 
 int isELF = 0;
-char *sha;
+char *sha = NULL;
 
 void netlink_output(char * filename)
 {
@@ -119,16 +119,48 @@ void netlink_output(char * filename)
         printk(KERN_INFO "Error while sending to user\n");
 }
 
+Link* search(List *list, char* str)
+{
+  	Link *temp;
+  	Link *ans;
+  	int i = 0;
+  	if(list == NULL || str == NULL)
+		return NULL;
+	temp = list->head;
+	ans = NULL;
+	if(temp != 0)
+	{
+		while(strcmp(temp->name, str) != 0 && temp->next != 0)
+		{
+			printk(KERN_INFO "Searching: %d\n", i);
+			++i;
+			temp = temp->next;
+		}
+		if(strcmp(temp->name, str) == 0)
+		{
+			ans = temp;
+		}
+	}
+	return ans;
+}
+
+int isExists(List *list, char* str)
+{
+	if(list == NULL || str == NULL)
+		return -1;
+	return (search(list, str) != 0);
+}
+
 void isBlockedProgram(void)
 {
-	List * list = sha_list;
-	if(list == NULL)
+	// List * list = sha_list;
+	if(sha_list == NULL || sha == NULL)
 		return;
 	/*if(isELF)
 		list = exec_hashes;
 	else
 		list = scripts_hashes;*/
-	if(isExists(list, sha))
+	if(isExists(sha_list, sha))
 		blocked_program = 1;
 	else
 		blocked_program = 0;
@@ -138,12 +170,12 @@ static void netlink_input(struct sk_buff *skb)
 {
     nlh = (struct nlmsghdr *)skb->data;
     sha = (char *)nlmsg_data(nlh);
-    isBlockedProgram();
+    // isBlockedProgram();
 
     if(nlh->nlmsg_pid != 0)
     	portid = nlh->nlmsg_pid; //portid of sending process
     printk(KERN_INFO "KERNEL GOT:%s. length = %d\n", sha, (int)strlen(sha));
-    // up(&sem);
+    // up(sem);
 }
 
 void get_time(void)
@@ -153,22 +185,21 @@ void get_time(void)
 	rtc_time_to_tm(local_time, &tm);
 }
 
-Link* findPrevious(List* list, Link* curr){
+Link* findPrevious(List* list, Link* curr)
+{
   Link* temp = 0;
-  if(curr != (list->head)){
-    while(((list->head)->next)-> value != curr->value ){
+  if(curr != (list->head))
+  {
+    while(((list->head)->next)-> value != curr->value )
+    {
       list->head = (list->head)->next;
     }
-    if(((list->head)->next)-> value == curr->value){
+    if(((list->head)->next)-> value == curr->value)
+    {
       temp = list->head;
     }
   }
   return temp;
-}
-
-int isExists(List *list, char* str)
-{
-	return (search(list, str) != 0);
 }
 
 /*
@@ -194,24 +225,10 @@ Link* search(List *list)
 }
 */
 
-Link* search(List *list, char* str){
-  Link *temp = list->head;
-  Link *ans = NULL;
-  if(temp != 0){
-    while(strcmp(temp->name, str) != 0 && temp->next != 0){
-      temp = temp->next;
-    }
-    if(strncmp(temp->name, str, strlen(temp->name)) == 0){
-      ans= temp;
-    }
-  }
-  return ans;
-}
-
-
 List * addLink(List *list, char* str)
 {
-	 if(!isExists(list, str)){
+	 if(!isExists(list, str))
+	 {
 		Link *new = kmalloc(sizeof(Link), GFP_KERNEL);
 		new->value = str;
 		new->next = NULL;
@@ -316,16 +333,17 @@ void enqueue(char *event)
 
 int my_sys_execve(const char *filename, const char *const argv[], const char *const envp[])
 {
+	// down(sem);
 	char entry[128];
 	char message[128];
 	char type_of_elf[14];
+	char formatted_sha[65];
 	char file_type[5];
 	struct file *file;
     mm_segment_t fs;
     int i;
     int isELF;
     char elf_type[] = {0x7f, 0x45, 0x4c, 0x46, 0x00};
-	//down(&sem);
 	if(filename == 0)
 	{
 		printk(KERN_INFO "ERROR: Filename is null\n");
@@ -340,6 +358,10 @@ int my_sys_execve(const char *filename, const char *const argv[], const char *co
     for(i = 0 ; i < 5 ; i++)
     {
         file_type[i] = 0;
+    }
+    for(i = 0 ; i < 65 ; i++)
+    {
+        formatted_sha[i] = 0;
     }
     fs = get_fs(); // Get current segment descriptor
     set_fs(get_ds()); // Set segment descriptor associated to kernel space
@@ -374,12 +396,14 @@ int my_sys_execve(const char *filename, const char *const argv[], const char *co
 		keep_working = 0;
 	}
 	msleep(100); // we want the user to have enough time to send the sha // TODO: CHANGE TO SEMAPHORE
+	if(sha != NULL)
+		strcpy(formatted_sha, sha);
 	if(blocked_program)
 	{
-    	sprintf(entry, "%04d.%02d.%02d %02d:%02d:%02d, %s: %s was not loaded due to configuration (%s)\n", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, type_of_elf, filename, sha);
+    	sprintf(entry, "%04d.%02d.%02d %02d:%02d:%02d, %s: %s was not loaded due to configuration (%s)\n", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, type_of_elf, filename, formatted_sha);
 		return -1;
 	}
-    sprintf(entry, "%04d.%02d.%02d %02d:%02d:%02d, %s: %s was loaded with pid %d (%s)\n", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, type_of_elf, filename, current->pid, sha);
+    sprintf(entry, "%04d.%02d.%02d %02d:%02d:%02d, %s: %s was loaded with pid %d (%s)\n", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, type_of_elf, filename, current->pid, formatted_sha);
     printk(KERN_INFO "%s", entry);
     enqueue(entry);
 	return original_execve_call(filename, argv, envp);
@@ -607,7 +631,7 @@ static int __init init_kblocker (void)
         return -1;
     }
     
-	sema_init(&sem, 1); // this initials the semaphore with 1 keys.
+	// sema_init(sem, 1); // this initials the semaphore with 1 keys.
 
     cr0 = read_cr0();
     write_cr0(cr0 & ~CR0_WP);
@@ -623,7 +647,7 @@ static int __init init_kblocker (void)
      *(int32_t*)ptr = (char*) my_sys_execve - ptr - 4;
 
     nl_sk = netlink_kernel_create(&init_net, NETLINK_USER, &cfg);
-    if (!nl_sk) 
+    if(!nl_sk)
     {
         printk(KERN_ALERT "Error creating socket.\n");
         return -10;
