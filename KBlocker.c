@@ -122,6 +122,8 @@ void netlink_output(char * filename)
 void isBlockedProgram(void)
 {
 	List * list = sha_list;
+	if(list == NULL)
+		return;
 	/*if(isELF)
 		list = exec_hashes;
 	else
@@ -141,7 +143,7 @@ static void netlink_input(struct sk_buff *skb)
     if(nlh->nlmsg_pid != 0)
     	portid = nlh->nlmsg_pid; //portid of sending process
     printk(KERN_INFO "KERNEL GOT:%s. length = %d\n", sha, (int)strlen(sha));
-    up(&sem);
+    // up(&sem);
 }
 
 void get_time(void)
@@ -273,9 +275,11 @@ void free_link(Link *link)
 	kfree(link);
 }
 
-void deleteLink(Link *link){
+void deleteLink(Link *link)
+{
     Link *previous = findPrevious(sha_list, link);
-	if(previous != NULL){
+	if(previous != NULL)
+	{
 	    previous->next = link->next;
     }
     free_link(link);
