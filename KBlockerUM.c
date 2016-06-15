@@ -126,7 +126,7 @@ int main()
         recvmsg(sock_fd, &msg, 0);
         strcpy(message, NLMSG_DATA(nlh));
         printf("USER GOT:%s\n", message);
-        sha_file();
+        // sha_file();
         // printf("USER GOT:%s. SHA=%s\n", message, NLMSG_DATA(nlh));
         // init_message();
         if(strncmp(message, "./unload.sh", strlen("./unload.sh")) == 0)

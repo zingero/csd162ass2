@@ -343,7 +343,7 @@ int type_check(char * type_of_elf, const char * filename, const char *first_argv
 {
 	char elf_type[] = {0x7f, 0x45, 0x4c, 0x46, 0x00};
     char script_type[] = {0x23, 0x21, 0x2f, 0x75, 0x73, 0x72, 0x2f, 0x62, 0x69, 0x6e, 0x2f, 0x70, 0x79, 0x74, 0x68, 0x6f, 0x6e, 0x00}; //#!/usr/bin/python
-	char file_type[5];
+	char file_type[18];
 	struct file *file;
 	mm_segment_t fs;
     int i;
@@ -353,7 +353,7 @@ int type_check(char * type_of_elf, const char * filename, const char *first_argv
     	printk(KERN_ALERT "ERROR: Can not open file\n");
     	return -1;
     }
-    for(i = 0 ; i < 5 ; i++)
+    for(i = 0 ; i < 18 ; i++)
     {
         file_type[i] = 0;
     }
@@ -363,7 +363,8 @@ int type_check(char * type_of_elf, const char * filename, const char *first_argv
     }
     fs = get_fs(); // Get current segment descriptor
     set_fs(get_ds()); // Set segment descriptor associated to kernel space
-    file->f_op->read(file, file_type, 4, &file->f_pos); // Read the file    // TODO: what if there is not 4 bytes to read?
+    file->f_op->read(file, file_type, 18, &file->f_pos); // Read the file    // TODO: what if there is not 4 bytes to read?
+    // file->f_op->read(file, file_type, 4, &file->f_pos); // Read the file    // TODO: what if there is not 4 bytes to read?
     set_fs(fs); // Restore segment descriptor
     filp_close(file, NULL); // See what we read from file
     if(strcmp(first_argv, "python") == 0)
@@ -371,12 +372,12 @@ int type_check(char * type_of_elf, const char * filename, const char *first_argv
 		strcpy(type_of_elf, "PYTHON SCRIPT");
 		return 0; 
 	}
-	else if(strcmp(file_type, elf_type) == 0)
+	else if(strncmp(file_type, elf_type, strlen(elf_type)) == 0)
 	{
 		strcpy(type_of_elf, "EXECUTABLE");
 		return 2;
 	}
-	else if(strncmp(file_type, script_type, strlen(file_type) - 1) == 0)
+	else if(strncmp(file_type, script_type, strlen(script_type) - 1) == 0)
 	{
 		strcpy(type_of_elf, "PYTHON SCRIPT");
 		return 1;
@@ -388,6 +389,11 @@ int type_check(char * type_of_elf, const char * filename, const char *first_argv
 	}
 }
 
+void path_fixer(char *full_path) // this function fixes the path when it gets relative path.
+{
+	
+}
+
 int my_sys_execve(const char *filename, const char *const argv[], const char *const envp[])
 {
 	// down(sem);
@@ -395,18 +401,18 @@ int my_sys_execve(const char *filename, const char *const argv[], const char *co
 	char message[128];
 	char type_of_elf[15];
     int i;
-    int file_type; // 0 = "python <file>", 1 = "#!/usr/bin/python", 2 = ELF, 3 = soemthing else
-    
+    int file_type; // 0 = "python <file>", 1 = "#!/usr/bin/python", 2 = ELF, 3 = something else
+    char *full_path = NULL;
+	char pwd[4];
+    int path_size;
+
 	if(filename == 0)
 	{
 		printk(KERN_INFO "ERROR: Filename is null\n");
 		return original_execve_call(filename, argv, envp);
 	}
-	for(i = 0 ; argv[i] != 0 ; ++i)
-	{
-		printk(KERN_INFO "argv[%d] = %s\n", i, argv[i]);
-	}
 	file_type = type_check(type_of_elf, filename, argv[0]);
+
 	if(file_type == 0)
 	{
 		if(!script_monitoring)
@@ -430,25 +436,57 @@ int my_sys_execve(const char *filename, const char *const argv[], const char *co
 		strcpy(message, filename);
 		netlink_output(message);
 	}
+	if(*message == '/')
+	{
+		// full path
+		// strncpy(full_path, message, strlen(full_path));
+		printk(KERN_INFO "FULL PATH. no need to change\n");
+		full_path = message;
+	}
+	else
+	{
+		printk(KERN_INFO "RELATIVE PATH. We need to change\n");
+		for(i = 0 ; envp[i] != 0; i++)
+	    {
+	        strncpy(pwd, envp[i], 4);
+	    	// printk(KERN_INFO "envp[%d] = %s. pwd = %s\n", i, envp[i], pwd);
+	        // pwd[3] = '\0';
+	        if(strncmp(pwd, "PWD", 3) == 0)
+	        {
+	        	// printk(KERN_INFO "IN PWD\n");
+	        	path_size = (strlen(envp[i]) - 4) + strlen(filename) + 1;
+	        	full_path =	kmalloc(path_size, GFP_KERNEL);
+	        	strcpy(full_path, envp[i] + 4);
+	        	strcat(full_path, "/");
+	        	strcat(full_path, filename);
+	        	break;
+	        }
+	    }
+	}
+	printk(KERN_ALERT "full path: %s\n", full_path);		
+
 	get_time();
 	if(keep_working)
 	{
 		if((*type_of_elf == 'P' && script_blocking) || (*type_of_elf == 'E' && exec_blocking))
 		{
-			netlink_output(message);
+			netlink_output(full_path);
+			// netlink_output(message);
 		}
 	}
 	if(strcmp(filename, "./unload.sh") == 0)
 	{
 		keep_working = 0;
+		for(i = 0 ; i < strlen(formatted_sha) ; ++i)
+			formatted_sha[i] = 0;
 	}
 	msleep(100); // we want the user to have enough time to send the sha // TODO: CHANGE TO SEMAPHORE
 	if(blocked_program)
 	{
-    	sprintf(entry, "%04d.%02d.%02d %02d:%02d:%02d, %s: %s was not loaded due to configuration (%s)\n", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, type_of_elf, message, formatted_sha);
+    	sprintf(entry, "%04d.%02d.%02d %02d:%02d:%02d, %s: %s was not loaded due to configuration (%s)\n", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, type_of_elf, full_path, formatted_sha);
 		return -1;
 	}
-    sprintf(entry, "%04d.%02d.%02d %02d:%02d:%02d, %s: %s was loaded with pid %d (%s)\n", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, type_of_elf, message, current->pid, formatted_sha);
+    sprintf(entry, "%04d.%02d.%02d %02d:%02d:%02d, %s: %s was loaded with pid %d (%s)\n", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, type_of_elf, full_path, current->pid, formatted_sha);
     printk(KERN_INFO "%s", entry);
     enqueue(entry);
 	return original_execve_call(filename, argv, envp);
