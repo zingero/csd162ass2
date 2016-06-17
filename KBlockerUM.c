@@ -20,18 +20,21 @@ int sock_fd;
 struct msghdr msg;
 char message[MAX_PAYLOAD] = {0};
 
-char* file_content(FILE* file, int size){
+char* file_content(FILE* file, int size)
+{
     int  c, i = 0;
     char* buffer = malloc(size);
     
-    while((c = fgetc(file)) != EOF){
+    while((c = fgetc(file)) != EOF)
+    {
         buffer[i] = c;
         i++;
     }
     return buffer;
 }
 
-void calculate_sha256(char *string, char outputBuffer[65], int size){
+void calculate_sha256(char *string, char outputBuffer[65], int size)
+{
     unsigned char hash[32];
     SHA256_CTX sha256;
     SHA256_Init(&sha256);
@@ -50,6 +53,7 @@ void sha_file()
 {
     FILE *fp;
     char *str;
+    int i = 0;
     fp = fopen(message,"r");
     if(fp == NULL) 
     {
@@ -57,7 +61,6 @@ void sha_file()
         return;
     }
 
-    //calculate buffer's size
     struct stat st;
     stat(message, &st);
     int size = st.st_size;
@@ -69,16 +72,12 @@ void sha_file()
     static unsigned char buffer[65];
     calculate_sha256(str, buffer, size);
     printf("sha in user = %s\n", buffer);
-    strcpy(NLMSG_DATA(nlh), buffer);
-}
-
-void init_message(void)
-{
-    int i = 0;
-    for(; i < MAX_PAYLOAD ; ++i)
+    for( i = 0 ; i < (int)strlen(message) ; ++i)
     {
-        message[i] = 0;
+        message[i] = '\0';
     }
+    strcpy(NLMSG_DATA(nlh), message); // this is for putting 0 in all nlh buffer
+    strcpy(NLMSG_DATA(nlh), buffer);
 }
 
 int main()
@@ -119,23 +118,16 @@ int main()
     // first time calling the kernel the kernel to give pid
     sendmsg(sock_fd, &msg, 0);
 
-    // Read message from kernel 
-
     while(1)
     {
         recvmsg(sock_fd, &msg, 0);
         strcpy(message, NLMSG_DATA(nlh));
         printf("USER GOT:%s\n", message);
-        // sha_file();
-        // printf("USER GOT:%s. SHA=%s\n", message, NLMSG_DATA(nlh));
-        // init_message();
-        if(strncmp(message, "./unload.sh", strlen("./unload.sh")) == 0)
+        if(strncmp(message, "./unload.sh", (int)strlen("./unload.sh")) == 0)
             break;
+        sha_file();
         sendmsg(sock_fd, &msg, 0);
     }    
     close(sock_fd);
     
 }
-
-// this is the data from the kernel: NLMSG_DATA(nlh)
-// this is how to change it: strcpy(NLMSG_DATA(nlh), new_string);

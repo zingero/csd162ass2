@@ -27,7 +27,7 @@
 #define CR0_WP 0x00010000 
 
 #define MAX_EVENTS 10
-#define BUF_SIZE 128
+#define BUF_SIZE 200
 
 int ans = 0;
 
@@ -83,23 +83,23 @@ char *sha = NULL;
 
 void netlink_output(char * filename)
 {
-    if(first_time || !strcmp(filename, "./netlink_user")) // we want to get the portid of the user program, so in the first time we doesn't want to send anything.
+    if(first_time) // we want to get the portid of the user program, so in the first time we doesn't want to send anything.
     {
     	first_time = 0;
     	return;
     }
-    skb_out = nlmsg_new(strlen(filename), 0);
+    skb_out = nlmsg_new((int)strlen(filename), 0);
     if (!skb_out) 
     {
         printk(KERN_ERR "Failed to allocate new skb\n");
         return;
     }
-    nlh = nlmsg_put(skb_out, 0, 0, NLMSG_DONE, strlen(filename), 0);
+    nlh = nlmsg_put(skb_out, 0, 0, NLMSG_DONE, (int)strlen(filename), 0);
     NETLINK_CB(skb_out).dst_group = 0; /* not in mcast group */
-    strncpy(nlmsg_data(nlh), filename, strlen(filename));
-    printk(KERN_INFO "SENDING TO USER: filename = %s\n", filename);
+    strncpy(nlmsg_data(nlh), filename, (int)strlen(filename));
     if (nlmsg_unicast(nl_sk, skb_out, portid) < 0)
         printk(KERN_INFO "Error while sending to user\n");
+    // printk(KERN_INFO "SENDING TO USER: filename = %s\n", filename);
 }
 
 int isExists(char* str)
@@ -123,12 +123,12 @@ void isBlockedProgram(void)
 {
 	if(isExists(formatted_sha))
 	{
-		printk(KERN_INFO "isBlockedProgram: yes, we want to block %s\n", formatted_sha);
+		// printk(KERN_INFO "isBlockedProgram: yes, we want to block %s\n", formatted_sha);
 		blocked_program = 1;
 	}
 	else
 	{
-		printk(KERN_INFO "isBlockedProgram: no, we don't want to block %s\n", formatted_sha);
+		// printk(KERN_INFO "isBlockedProgram: no, we don't want to block %s\n", formatted_sha);
 		blocked_program = 0;
 	}
 }
@@ -144,7 +144,7 @@ static void netlink_input(struct sk_buff *skb)
 
     if(nlh->nlmsg_pid != 0)
     	portid = nlh->nlmsg_pid; //portid of sending process
-    printk(KERN_INFO "KERNEL GOT:%s. length = %d\n", sha, (int)strlen(sha));
+    // printk(KERN_INFO "KERNEL GOT:%s. length = %d\n", sha, (int)strlen(sha));
     // up(sem);
 }
 
@@ -158,10 +158,11 @@ void get_time(void)
 void addLink(char * str)
 {
 	Link * new_link = kmalloc(sizeof(Link), GFP_KERNEL);
-    new_link->value = kmalloc(strlen(str), GFP_KERNEL);
+    new_link->value = kmalloc((int)strlen(str), GFP_KERNEL);
     strcpy(new_link->value, str);
     INIT_LIST_HEAD(&new_link->list);
     list_add_tail(&new_link->list, &(sha_list_head.list));
+	printk(KERN_INFO "Add hash: %s", str);
 }
 
 void deleteLink(char *str)
@@ -208,6 +209,7 @@ void enqueue(char *event)
     {
 		dequeue();
     }
+    // printk(KERN_INFO "enqueue: %d. %s.\n", (int)strlen(event), event);
     strcpy(events[num_of_events], event);
     num_of_events++;
 }
@@ -226,13 +228,13 @@ int type_check(char * type_of_elf, const char * filename, const char *first_argv
     	printk(KERN_ALERT "ERROR: Can not open file\n");
     	return -1;
     }
-    for(i = 0 ; i < 18 ; i++)
+    for(i = 0 ; i < (int)strlen(file_type) ; i++)
     {
-        file_type[i] = 0;
+        file_type[i] = '\0';
     }
-    for(i = 0 ; i < 15 ; i++)
+    for(i = 0 ; i < (int)strlen(type_of_elf) ; i++)
     {
-        type_of_elf[i] = 0;
+        type_of_elf[i] = '\0';
     }
     fs = get_fs(); // Get current segment descriptor
     set_fs(get_ds()); // Set segment descriptor associated to kernel space
@@ -244,12 +246,12 @@ int type_check(char * type_of_elf, const char * filename, const char *first_argv
 		strcpy(type_of_elf, "PYTHON SCRIPT");
 		return 0; 
 	}
-	else if(strncmp(file_type, elf_type, strlen(elf_type)) == 0)
+	else if(strncmp(file_type, elf_type, (int)strlen(elf_type)) == 0)
 	{
 		strcpy(type_of_elf, "EXECUTABLE");
 		return 2;
 	}
-	else if(strncmp(file_type, script_type, strlen(script_type) - 1) == 0)
+	else if(strncmp(file_type, script_type, (int)strlen(script_type) - 1) == 0)
 	{
 		strcpy(type_of_elf, "PYTHON SCRIPT");
 		return 1;
@@ -284,6 +286,10 @@ int my_sys_execve(const char *filename, const char *const argv[], const char *co
 	// {
 	// 	printk(KERN_INFO "argv[%d] = %s\n", i, argv[i]);
 	// }
+	for( i = 0 ; i < (int)strlen(message) ; ++i)
+	{
+		message[i] = '\0';
+	}
 	if(file_type == 0)
 	{
 		if(!script_monitoring)
@@ -318,7 +324,7 @@ int my_sys_execve(const char *filename, const char *const argv[], const char *co
 	        strncpy(pwd, envp[i], 4);
 	        if(strncmp(pwd, "PWD", 3) == 0)
 	        {
-	        	path_size = (strlen(envp[i]) - 4) + strlen(filename) + 1;
+	        	path_size = ((int)strlen(envp[i]) - 4) + (int)strlen(filename) + 1;
 	        	full_path =	kmalloc(path_size, GFP_KERNEL);
 	        	delete_path = 1;
 	        	strcpy(full_path, envp[i] + 4);
@@ -340,7 +346,7 @@ int my_sys_execve(const char *filename, const char *const argv[], const char *co
 	if(strcmp(filename, "./unload.sh") == 0)
 	{
 		keep_working = 0;
-		for(i = 0 ; i < strlen(formatted_sha) ; ++i)
+		for(i = 0 ; i < (int)strlen(formatted_sha) ; ++i)
 			formatted_sha[i] = 0;
 	}
 	msleep(100); // we want the user to have enough time to send the sha // TODO: CHANGE TO SEMAPHORE
@@ -380,8 +386,8 @@ void print_events(void)
 	int i = 0;
 	for(; i < num_of_events ; ++i)
 	{
-		printk(KERN_INFO "-------------- %d ---------------- %s", i, events[i]);
-		// printk(KERN_INFO "%s", events[i]);
+		// printk(KERN_INFO "------ %d ------- %d ------- %s", i, (int)strlen(events[i]), events[i]);
+		printk(KERN_INFO "%s", events[i]);
 	}
 }
 
@@ -440,13 +446,13 @@ ssize_t fops_write(struct file *sp_file,const char __user *buf, size_t size, lof
 {
 	char new_sha[66];
 	int i = 0;
-	for(; i < strlen(new_sha) ; ++i)
+	for(; i < (int)strlen(new_sha) ; ++i)
 	{
 		new_sha[i] = 0;
 	}
 	if(size > 73)
 	{
-	    printk(KERN_DEBUG "Error: cannot parse string. Too many characters.\n");
+	    printk(KERN_DEBUG "Error: Can not parse string. Too many characters.\n");
 	    return -1;
 	}
 	len = size;
@@ -461,20 +467,20 @@ ssize_t fops_write(struct file *sp_file,const char __user *buf, size_t size, lof
 				else if(*(msg + 8) == '0')
 					exec_monitoring = 0;
 				else 
-					printk(KERN_DEBUG "Error: cannot parse string.\n");
+					printk(KERN_DEBUG "Error: Can not parse string.\n");
 			}
 			else if(*(msg + 4) == 'B')
 			{
-			    if(*(msg + 9) == '1')
+			    if(*(msg + 10) == '1')
 					exec_blocking = 1;
-				else if(*(msg + 9) == '0')
+				else if(*(msg + 10) == '0')
 					exec_blocking = 0;
 				else 
-					printk(KERN_DEBUG "Error: cannot parse string.\n");
+					printk(KERN_DEBUG "Error: Can not parse string.\n");
 			}
 			else
 			{
-			    printk(KERN_DEBUG "Error: cannot parse string.\n");
+			    printk(KERN_DEBUG "Error: Can not parse string.\n");
 			}
 			break;
 	    case 'S':
@@ -485,7 +491,7 @@ ssize_t fops_write(struct file *sp_file,const char __user *buf, size_t size, lof
 				else if(*(msg + 10) == '0')
 					script_monitoring = 0;
 				else 
-					printk(KERN_DEBUG "Error: cannot parse string.\n");
+					printk(KERN_DEBUG "Error: Can not parse string.\n");
 			}
 			else if(*(msg + 6) == 'B')
 			{
@@ -494,15 +500,15 @@ ssize_t fops_write(struct file *sp_file,const char __user *buf, size_t size, lof
 				else if(*(msg + 12) == '0')
 					exec_blocking = 0;
 				else 
-					printk(KERN_DEBUG "Error: cannot parse string.\n");
+					printk(KERN_DEBUG "Error: Can not parse string.\n");
 			}
 			else
 			{
-			    printk(KERN_DEBUG "Error: cannot parse string.\n");
+			    printk(KERN_DEBUG "Error: Can not parse string.\n");
 			}
 			break;
 	    case 'A': //add
-	    	if(strlen(msg) < 73)
+	    	if((int)strlen(msg) < 73)
 	    	{
 	    		printk(KERN_INFO "ERROR: not enough characters. You wrote only %d characters\n", (int)strlen(msg));
 	    	}
@@ -513,7 +519,7 @@ ssize_t fops_write(struct file *sp_file,const char __user *buf, size_t size, lof
 	    	}
 	    	break;
 	    case 'D':
-	    	if(strlen(msg) < 73)
+	    	if((int)strlen(msg) < 73)
 	    	{
 	    		printk(KERN_INFO "ERROR: not enough characters. You wrote only %d characters\n", (int)strlen(msg));
 	    	}
