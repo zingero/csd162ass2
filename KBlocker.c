@@ -20,6 +20,7 @@
 #include <linux/wait.h>
 #include <linux/slab.h>
 #include <linux/semaphore.h>
+#include <linux/list.h>
 
 #define NETLINK_USER 31
 // Write Protect Bit (CR0:16)
@@ -54,32 +55,41 @@ int num_of_events = 0;
 char events[MAX_EVENTS][BUF_SIZE];
 
 /* -------------------------------------- linked list BEGINS ---------------------------------------------------- */
-typedef struct Link
-{
-	char* value;
-	char* name;
-	struct Link* next;
-} Link;
+// typedef struct Link
+// {
+// 	char* value;
+// 	struct Link* next;
+// } Link;
 
-typedef struct List
-{
-	int counter;
-	Link* head;
-} List; 
-Link* findPrevious(List* list, Link* curr);
-int isExists(List *list, char* str);
-Link* search(List *list, char* str);
-List* addLink(List *list1, char* str);
-Link* addToTail(List *list, Link *new);
-void init_list(List*);
-void free_list(List *log);
-void free_link(Link *link);
-void deleteLink(Link *link);
+// typedef struct List
+// {
+// 	Link* head;
+// 	int counter;
+// } List; 
+// Link* findPrevious(List* list, Link* curr);
+// int isExists(char* str);
+// Link* search(char* str);
+// void addLink(char* str);
+// void addToTail(Link *new);
+// void init_sha_list(void);
+// void free_list(List *log);
+// void free_link(Link *link);
+// void deleteLink(Link *link);
 
 //List *exec_hashes;
 //List *scripts_hashes;
-List *sha_list;
+// List *sha_list;
 
+typedef struct Link
+{
+    char *value;
+    struct list_head list; /* kernel's list structure */
+} Link;
+
+ struct Link sha_list_head;
+
+
+void print_hashes(void);
 /* -------------------------------------- linked list ENDS ---------------------------------------------------- */
 
 unsigned long **find_sys_call_table(void);
@@ -120,65 +130,129 @@ void netlink_output(char * filename)
         printk(KERN_INFO "Error while sending to user\n");
 }
 
-Link* search(List *list, char* str)
+// Link* search(char* str)
+// {
+//   	Link *temp;
+//   	Link *ans = NULL;
+//   	int i = 0;
+//   	char test[70];
+//   	if(sha_list == NULL || str == NULL)
+// 	{
+// 		printk(KERN_INFO "search: sha_list is null or the str is null\n");
+// 		return NULL;
+// 	}
+// 	for(; i < 70 ; ++i)
+// 		test[i] = '\0';
+// 	i = 0;
+// 	temp = sha_list->head;
+// 	if(temp != 0 && (temp->value) != 0)
+// 	{
+// 		if(strlen(temp->value) < 70)
+// 			strcpy(test, temp->value);
+// 		else
+// 			printk(KERN_INFO "search: %d is greater then 70\n", (int)strlen(temp->value));
+// 		(temp->value)[64] = '\0';
+// 		formatted_sha[64] = '\0';
+// 		test[64] = '\0';
+// 		printk(KERN_INFO "search: the head is not null. temp->value = %s. str = %s. lengths: %d\t%d\n", temp->value, str, (int)strlen(temp->value), (int)strlen(str));
+// 		while(temp != 0 && strcmp(test, str) != 0 && temp->next != 0)
+// 		{
+// 			++i;
+// 			temp = temp->next;
+// 			printk(KERN_INFO "Searching: %d. temp->value = %s. str = %s\n", i, temp->value, str);
+// 		}
+// 		if(strcmp(test, str) == 0)
+// 		{
+// 			printk(KERN_INFO "search: in if\n");
+// 			ans = temp;
+// 		}
+// 	}
+// 	else
+// 	{
+// 		printk(KERN_INFO "search: the head is null\n");
+// 	}
+// 	// if(ans == NULL)
+// 	// {
+// 	// 	printk(KERN_INFO "search: ans is null\n");
+// 	// 	blocked_program = 0;
+// 	// }
+// 	// else
+// 	// {
+// 	// 	printk(KERN_INFO "search: ans is not null\n");
+// 	// 	blocked_program = 1;
+// 	// }
+// 	// return NULL;
+// 	// return temp;
+// 	return ans;
+// }
+
+int isExists(char* str)
 {
-  	Link *temp;
-  	Link *ans;
-  	int i = 0;
-  	if(list == NULL || str == NULL)
-		return NULL;
-	temp = list->head;
-	ans = NULL;
-	if(temp != 0)
+	Link *link = NULL;
+	if(str == NULL)
 	{
-		while(strcmp(temp->name, str) != 0 && temp->next != 0)
-		{
-			printk(KERN_INFO "Searching: %d\n", i);
-			++i;
-			temp = temp->next;
-		}
-		if(strcmp(temp->name, str) == 0)
-		{
-			ans = temp;
-		}
+		printk(KERN_INFO "isExists: the string is null\n");
+		return -1;
 	}
-	return ans;
+	list_for_each_entry(link, &sha_list_head.list, list) 
+    {
+    	(link->value)[64] = '\0';
+    	// printk(KERN_INFO "isExists: str = %s. link->value = %s. length: %d\t%d\n", str, link->value, (int)strlen(str), (int)strlen(link->value));
+        if(strcmp(str, link->value) == 0)
+        	return 1;
+    }
+    return 0;
 }
 
-int isExists(List *list, char* str)
-{
-	if(list == NULL || str == NULL)
-		return -1;
-	return (search(list, str) != 0);
-}
+// int isExists(char* str)
+// {
+// 	if(sha_list == NULL || str == NULL)
+// 	{
+// 		printk(KERN_INFO "isExists: the list or the string is null\n");
+// 		return -1;
+// 	}
+// 	printk(KERN_INFO "isExist: %d\n", (search(str) != NULL));
+// 	return (search(str) != NULL);
+// 	// if(search(str) != NULL)
+// 	// {
+// 	// 	return 1;
+// 	// }
+// 	// return blocked_program;
+// }
 
 void isBlockedProgram(void)
 {
 	// List * list = sha_list;
-	if(sha_list == NULL || sha == NULL)
-		return;
+	// if(sha_list == NULL || sha == NULL)
+		// return;
 	/*if(isELF)
 		list = exec_hashes;
 	else
 		list = scripts_hashes;*/
-	if(isExists(sha_list, sha))
+	if(isExists(formatted_sha))
+	{
+		printk(KERN_INFO "isBlockedProgram: yes, we want to block %s\n", formatted_sha);
 		blocked_program = 1;
+	}
 	else
+	{
+		printk(KERN_INFO "isBlockedProgram: no, we don't want to block %s\n", formatted_sha);
 		blocked_program = 0;
+	}
 }
 
 static void netlink_input(struct sk_buff *skb)
 {
-	int i = 0;
+	// int i = 0;
     nlh = (struct nlmsghdr *)skb->data;
     sha = (char *)nlmsg_data(nlh);
-    isBlockedProgram();
-    for(i = 0 ; i < 65 ; i++)
-    {
-        formatted_sha[i] = 0;
-    }
 	if(sha != NULL)
-	strcpy(formatted_sha, sha);
+		strcpy(formatted_sha, sha);
+    isBlockedProgram();
+    // for(i = 0 ; i < 65 ; i++)
+    // {
+    //     formatted_sha[i] = 0;
+    // }
 
     if(nlh->nlmsg_pid != 0)
     	portid = nlh->nlmsg_pid; //portid of sending process
@@ -193,22 +267,22 @@ void get_time(void)
 	rtc_time_to_tm(local_time, &tm);
 }
 
-Link* findPrevious(List* list, Link* curr)
-{
-  Link* temp = 0;
-  if(curr != (list->head))
-  {
-    while(((list->head)->next)-> value != curr->value )
-    {
-      list->head = (list->head)->next;
-    }
-    if(((list->head)->next)-> value == curr->value)
-    {
-      temp = list->head;
-    }
-  }
-  return temp;
-}
+// Link* findPrevious(List* list, Link* curr)
+// {
+//   Link* temp = 0;
+//   if(curr != (list->head))
+//   {
+//     while(((list->head)->next)-> value != curr->value )
+//     {
+//       list->head = (list->head)->next;
+//     }
+//     if(((list->head)->next)-> value == curr->value)
+//     {
+//       temp = list->head;
+//     }
+//   }
+//   return temp;
+// }
 
 /*
 Link* search(List *list)
@@ -233,82 +307,94 @@ Link* search(List *list)
 }
 */
 
-List * addLink(List *list, char* str)
+void addLink(char * str)
 {
-	 if(!isExists(list, str))
-	 {
-		Link *new = kmalloc(sizeof(Link), GFP_KERNEL);
-		new->value = str;
-		new->next = NULL;
-		if(!list->head)
-		{
-			list->head = new;
-			list->counter = 1;
-		}
-		else
-		{
-			list->head = addToTail(list, new);
-		    list->counter++;
-		}
-	}
-	return list;
+	Link * new_link = kmalloc(sizeof(Link), GFP_KERNEL);
+    new_link->value = kmalloc(strlen(str), GFP_KERNEL);
+    strcpy(new_link->value, str);
+    INIT_LIST_HEAD(&new_link->list);
+    /* add the new node to mylist */
+    list_add_tail(&new_link->list, &(sha_list_head.list));
 }
 
-Link * addToTail(List *list, Link *new)
-{
-	Link *temp;
-	if(list == NULL)
-		return NULL;
-	temp = list->head;
-	while(temp->next != NULL)
-	{
-		temp = temp->next;
-	}
-	temp->next = new;
-	return list->head;
-}
+// void addLink(char* str)
+// {
+// 	Link *new = NULL;
+// 	if(!isExists(str))
+// 	{
+// 		new = kmalloc(sizeof(Link), GFP_KERNEL);
+// 		new->value = kmalloc(strlen(str), GFP_KERNEL);
+// 		strcpy(new->value, str);
+// 		new->next = NULL;
+// 		if(!sha_list->head)
+// 		{
+// 			printk(KERN_INFO "add link: new head! new->value = %s. str = %s. length = %d\t%d\n", new->value, str, (int)strlen(new->value), (int)strlen(str));
+// 			sha_list->head = new;
+// 			sha_list->counter = 1;
+// 		}
+// 		else
+// 		{
+// 			printk(KERN_INFO "add link: add to tail\n");
+// 			addToTail(new);
+// 	    	sha_list->counter++;
+// 		}
+// 	}
+// 	print_hashes();
+// }
 
-void init_list(List *uninit_list)
-{
-    List *list = kmalloc(sizeof(list), GFP_KERNEL);
-	list->counter = 0;
-  	list->head = NULL;
-  	uninit_list = list;
-}
+// void addToTail(Link *new)
+// {
+// 	Link *temp;
+// 	if(sha_list == NULL)
+// 		return;
+// 	temp = sha_list->head;
+// 	while(temp->next != NULL)
+// 	{
+// 		temp = temp->next;
+// 	}
+// 	temp->next = new;
+// }
 
-void free_list(List * log) 
-{
-	Link* curr;
-	Link* tmp;
-	if(log == NULL)
-		return;
-	curr = log->head;
-	while (curr != 0) 
-    {
-	  tmp = curr;
-	  curr = curr->next;
-	  free_link(tmp);
-	}
-	kfree(log); 
-}
+// void init_sha_list(void)
+// {
+// 	sha_list = kmalloc(sizeof(List), GFP_KERNEL);
+// 	sha_list->counter = 0;
+//   	sha_list->head = NULL;
+// }
 
-void free_link(Link *link) 
-{
-	if(link == NULL)
-		return;
-	kfree(link->value);
-	kfree(link);
-}
+// void free_list(List * log) 
+// {
+// 	Link* curr;
+// 	Link* tmp;
+// 	if(log == NULL)
+// 		return;
+// 	curr = log->head;
+// 	while (curr != 0) 
+//     {
+// 	  tmp = curr;
+// 	  curr = curr->next;
+// 	  free_link(tmp);
+// 	}
+// 	kfree(log); 
+// }
 
-void deleteLink(Link *link)
-{
-    Link *previous = findPrevious(sha_list, link);
-	if(previous != NULL)
-	{
-	    previous->next = link->next;
-    }
-    free_link(link);
-}
+// void free_link(Link *link) 
+// {
+// 	if(link == NULL)
+// 		return;
+// 	kfree(link->value);
+// 	kfree(link);
+// }
+
+// void deleteLink(Link *link)
+// {
+//     Link *previous = findPrevious(sha_list, link);
+// 	if(previous != NULL)
+// 	{
+// 	    previous->next = link->next;
+//     }
+//     free_link(link);
+// }
 
 void dequeue(void)
 {
@@ -389,11 +475,6 @@ int type_check(char * type_of_elf, const char * filename, const char *first_argv
 	}
 }
 
-void path_fixer(char *full_path) // this function fixes the path when it gets relative path.
-{
-	
-}
-
 int my_sys_execve(const char *filename, const char *const argv[], const char *const envp[])
 {
 	// down(sem);
@@ -405,12 +486,13 @@ int my_sys_execve(const char *filename, const char *const argv[], const char *co
     char *full_path = NULL;
 	char pwd[4];
     int path_size;
-
+    int delete_path = 0;
 	if(filename == 0)
 	{
 		printk(KERN_INFO "ERROR: Filename is null\n");
 		return original_execve_call(filename, argv, envp);
 	}
+	blocked_program = 0;
 	file_type = type_check(type_of_elf, filename, argv[0]);
 
 	if(file_type == 0)
@@ -439,13 +521,12 @@ int my_sys_execve(const char *filename, const char *const argv[], const char *co
 	if(*message == '/')
 	{
 		// full path
-		// strncpy(full_path, message, strlen(full_path));
-		printk(KERN_INFO "FULL PATH. no need to change\n");
+		// printk(KERN_INFO "FULL PATH. no need to change\n");
 		full_path = message;
 	}
 	else
 	{
-		printk(KERN_INFO "RELATIVE PATH. We need to change\n");
+		// printk(KERN_INFO "RELATIVE PATH. We need to change\n");
 		for(i = 0 ; envp[i] != 0; i++)
 	    {
 	        strncpy(pwd, envp[i], 4);
@@ -456,6 +537,7 @@ int my_sys_execve(const char *filename, const char *const argv[], const char *co
 	        	// printk(KERN_INFO "IN PWD\n");
 	        	path_size = (strlen(envp[i]) - 4) + strlen(filename) + 1;
 	        	full_path =	kmalloc(path_size, GFP_KERNEL);
+	        	delete_path = 1;
 	        	strcpy(full_path, envp[i] + 4);
 	        	strcat(full_path, "/");
 	        	strcat(full_path, filename);
@@ -463,7 +545,7 @@ int my_sys_execve(const char *filename, const char *const argv[], const char *co
 	        }
 	    }
 	}
-	printk(KERN_ALERT "full path: %s\n", full_path);		
+	// printk(KERN_ALERT "full path: %s\n", full_path);		
 
 	get_time();
 	if(keep_working)
@@ -489,6 +571,10 @@ int my_sys_execve(const char *filename, const char *const argv[], const char *co
     sprintf(entry, "%04d.%02d.%02d %02d:%02d:%02d, %s: %s was loaded with pid %d (%s)\n", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, type_of_elf, full_path, current->pid, formatted_sha);
     printk(KERN_INFO "%s", entry);
     enqueue(entry);
+    if(delete_path)
+    {
+    	kfree(full_path);
+    }
 	return original_execve_call(filename, argv, envp);
 }
 
@@ -509,7 +595,7 @@ void print_events(void)
 	int i = 0;
 	for(; i < num_of_events ; ++i)
 	{
-		printk(KERN_INFO "%s", events[i]);
+		printk(KERN_INFO "-------------- %d ---------------- %s", i, events[i]);
 	}
 }
 
@@ -535,12 +621,11 @@ void print_conf(void)
 
 void print_hashes(void)
 {
-  	Link *curr = sha_list->head;
-	while (curr != 0) 
+  	Link *curr;
+	list_for_each_entry(curr, &sha_list_head.list, list) 
     {
-		printk(KERN_INFO "%s", curr->value);
-		curr = curr->next;
-	}
+        printk(KERN_INFO "Hash: %s", curr->value);
+    }
 }
 /*
 void print_hashes_execs(void)
@@ -574,25 +659,31 @@ ssize_t fops_read(struct file *sp_file, char __user *buf, size_t size, loff_t *o
 	}
 
 	copy_to_user(buf,msg,len);
-	printk(KERN_INFO "KBlocker - Last Events:\n");
+	printk(KERN_INFO "\nKBlocker - Last Events:\n");
 	print_events();
-	printk(KERN_INFO "KBlocker Current Configuration:\n");
+	printk(KERN_INFO "\nKBlocker Current Configuration:\n");
 	print_conf();
 	/*printk(KERN_INFO "SHA256 hashes to block (Executables)\n");
 	print_hashes_execs();
 	printk(KERN_INFO "SHA256 hashes to block (Python Scripts)\n");
 	print_hashes_scripts();*/
-	printk(KERN_INFO "SHA256 hashes to block:\n");
+	printk(KERN_INFO "\nSHA256 hashes to block:\n");
 	print_hashes();
+	printk(KERN_INFO "\n");
 	return len;
 }
 
 /* write controling: parsing user preferences and LKM definition*/
 ssize_t fops_write(struct file *sp_file,const char __user *buf, size_t size, loff_t *offset)
 {
-	char new_sha[256];
-	printk(KERN_INFO "proc called write %d\n",(int)size);
-	if(size > 14)
+	char new_sha[70];
+	int i = 0;
+	for(; i < 70 ; ++i)
+	{
+		new_sha[i] = 0;
+	}
+	// printk(KERN_INFO "proc called write %d\n",(int)size);
+	if(size > 73)
 	{
 	    printk(KERN_DEBUG "Error: cannot parse string. Too many characters.\n");
 	    return -1;
@@ -650,14 +741,14 @@ ssize_t fops_write(struct file *sp_file,const char __user *buf, size_t size, lof
 			}
 			break;
 	    case 'A': //add
-	    	printk(KERN_INFO "'A' case in writing\n");
+	    	// printk(KERN_INFO "'A' case in writing\n");
 	    	strcpy(new_sha, msg + 8);
-	    	addLink(sha_list, new_sha);
+	    	addLink(new_sha);
 	    	break;
 	    case 'D':
-	    	printk(KERN_INFO "'D' case in writing\n");
+	    	// printk(KERN_INFO "'D' case in writing\n");
 	    	strcpy(new_sha, msg + 8);
-	    	deleteLink(search(sha_list, new_sha));
+	    	// deleteLink(search(new_sha));
 			break;
 	    default:
 		printk(KERN_DEBUG "Error: cannot parse string.\n");
@@ -738,7 +829,9 @@ static int __init init_kblocker (void)
 
     // init_list(exec_hashes);
 	//init_list(scripts_hashes);
-	init_list(sha_list);
+	// init_sha_list();
+    INIT_LIST_HEAD(&sha_list_head.list);
+
 
     write_cr0(cr0);
     return 0;	
@@ -747,6 +840,7 @@ static int __init init_kblocker (void)
 static void __exit exit_kblocker(void)
 {
     char *ptr = 0;
+	struct Link *aPerson, *tmp;
     unsigned long cr0;
     cr0 = read_cr0();
     write_cr0(cr0 & ~CR0_WP);
@@ -763,7 +857,13 @@ static void __exit exit_kblocker(void)
 
 	//free_list(exec_hashes);
 	//free_list(scripts_hashes);
-	free_list(sha_list);
+	// free_list(sha_list);
+    list_for_each_entry_safe(aPerson, tmp, &sha_list_head.list, list)
+    {
+         list_del(&aPerson->list);
+         kfree(aPerson->value);
+         kfree(aPerson);
+    }
 
     write_cr0(cr0);
     printk(KERN_INFO "exit KBlockerfs\n");
